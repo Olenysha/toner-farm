@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Карточка тонера — Тонер-фарм{% endblock %}
+{% block content %}
+<div id="item-box"><p>Загрузка…</p></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ean = {{ ean | tojson }};
+
+async function load() {
+    const box = document.getElementById('item-box');
+    const r = await api('/api/lookup/' + encodeURIComponent(ean));
+    if (!r.found) {
+        box.innerHTML = `<div class="card"><h1>Не найдено</h1>
+            <p>EAN ${ean} неизвестен. <a href="/scan">Отсканировать заново</a></p></div>`;
+        return;
+    }
+    const bc = r.barcode, t = r.toner, p = r.printer;
+    let html = `<div class="card">
+        <h1>${bc.model_name || 'Тонер'} ${colorChip(bc.color)}</h1>
+        <p style="color:var(--muted);font-family:monospace">${ean}</p>
+        <p><b>Совместимые принтеры:</b><br>${(bc.compatible_printers || []).join('<br>') || '—'}</p>
+        <p><b>Ресурс:</b> ${bc.page_yield ? bc.page_yield + ' стр.' : '—'}</p>`;
+
+    if (t && t.status === 'installed' && p) {
+        html += `<p><b>Установлен в:</b> ${p.name} (${p.model})<br><b>С:</b> ${t.installed_at || '—'}</p>
+        <button class="btn btn-block btn-danger" id="btn-return">Вернуть на склад</button>`;
+    } else if (t && t.status === 'stock') {
+        html += `<p><b>Статус:</b> на складе (шт.: ${t.quantity})</p>
+        <button class="btn btn-block" id="btn-install">Установить в принтер</button>`;
+    } else {
+        html += `<p><b>Статус:</b> нет в наличии</p>`;
+    }
+    html += `</div><div id="done"></div>`;
+    box.innerHTML = html;
+
+    const bi = document.getElementById('btn-install');
+    if (bi) bi.onclick = () => location.href = `/?mode=select&toner_id=${t.id}`;
+
+    const br = document.getElementById('btn-return');
+    if (br) br.onclick = () => {
+        showModal('Подтверждение', '<p style="font-size:18px">Вернуть на склад?</p>', [
+            { label: 'Да', cls: 'btn-ok', keepOpen: true, onClick: async () => {
+                try {
+                    await api('/api/return', 'POST', { toner_id: t.id, user_name: getUserName() });
+                    closeModal();
+                    document.getElementById('done').innerHTML =
+                        '<div class="card" style="text-align:center"><h1>Готово ✓</h1></div>';
+                    setTimeout(() => location.href = '/', 1500);
+                } catch (e) { toast(e.message, 'err'); }
+            }},
+            { label: 'Нет', cls: 'btn-secondary' }]);
+    };
+}
+load();
+</script>
+{% endblock %}

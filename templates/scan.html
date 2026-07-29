@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Сканер — Тонер-фарм{% endblock %}
+{% block body_class %}scanner-page{% endblock %}
+{% block content %}
+<div id="scanner-view">
+    <div id="qr-reader"></div>
+    <div class="visor"></div>
+    <div class="scan-hint">Наведите камеру на штрих-код EAN-13 тонера</div>
+</div>
+
+<div class="card" id="new-form" style="display:none; margin:16px">
+    <h2>Новый тонер</h2>
+    <p>EAN-13: <b id="new-ean"></b> — такой код ещё не известен системе.</p>
+    <label for="nf-model">Модель / название</label>
+    <input type="text" id="nf-model" placeholder="HP CF410A (410A)">
+    <label for="nf-color">Цвет</label>
+    <select id="nf-color">
+        <option value="Black">Black — чёрный</option>
+        <option value="Cyan">Cyan — голубой</option>
+        <option value="Magenta">Magenta — пурпурный</option>
+        <option value="Yellow">Yellow — жёлтый</option>
+    </select>
+    <label for="nf-compat">Совместимые принтеры (модели)</label>
+    <select id="nf-compat" multiple></select>
+    <label for="nf-yield">Ресурс, страниц (page yield)</label>
+    <input type="number" id="nf-yield" min="0" placeholder="2300">
+    <div style="margin-top:16px">
+        <button class="btn btn-block" id="nf-save">Сохранить</button>
+        <button class="btn btn-block btn-secondary" style="margin-top:10px" id="nf-cancel">Отмена</button>
+    </div>
+</div>
+
+<div class="card" style="margin:16px; font-size:14px; color:var(--muted)">
+    ⚠️ Камера в мобильном Chrome работает только по HTTPS или на localhost.
+    По обычному HTTP с телефона сканер не запустится.
+    <!-- v2: mkcert-сертификат для внутреннего HTTPS или флаг chrome://flags/#unsafely-treat-insecure-origin-as-secure -->
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/html5-qrcode.min.js') }}"></script>
+<script>
+let scanner = null;
+let stopped = false;
+
+function beep() {
+    // короткий бип через WebAudio, без аудиофайла
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = 880; osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(200);
+}
+
+async function onDecoded(text) {
+    if (stopped) return;
+    stopped = true;
+    beep();
+    await stopScanner();
+    const ean = text.trim();
+    try {
+        const r = await api('/api/lookup/' + encodeURIComponent(ean));
+        if (r.found) {
+            location.href = '/item/' + encodeURIComponent(ean);
+        } else {
+            showNewForm(ean);
+        }
+    } catch (e) {
+        toast(e.message, 'err');
+        stopped = false;
+        startScanner();
+    }
+}
+
+function startScanner() {
+    stopped = false;
+    scanner = new Html5Qrcode('qr-reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.QR_CODE],
+        verbose: false
+    });
+    scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 280, height: 160 } },
+        onDecoded,
+        () => {} // ошибки декодирования кадра игнорируем
+    ).catch(err => {
+        toast('Не удалось запустить камеру: ' + err, 'err');
+    });
+}
+
+async function stopScanner() {
+    if (scanner) {
+        try { await scanner.stop(); } catch (e) {}
+        try { scanner.clear(); } catch (e) {}
+    }
+}
+
+// ---------- Форма «Новый тонер» ----------
+async function showNewForm(ean) {
+    document.getElementById('scanner-view').style.display = 'none';
+    const form = document.getElementById('new-form');
+    form.style.display = 'block';
+    document.getElementById('new-ean').textContent = ean;
+    // список моделей принтеров для мультиселекта
+    const sel = document.getElementById('nf-compat');
+    sel.innerHTML = '';
+    const printers = await api('/api/printers');
+    [...new Set(printers.map(p => p.model))].forEach(m => {
+        const o = document.createElement('option');
+        o.value = m; o.textContent = m;
+        sel.appendChild(o);
+    });
+
+    document.getElementById('nf-save').onclick = async () => {
+        const compat = [...sel.selectedOptions].map(o => o.value);
+        try {
+            await api('/api/barcode_map', 'POST', {
+                ean_13: ean,
+                model_name: document.getElementById('nf-model').value,
+                color: document.getElementById('nf-color').value,
+                compatible_printers: compat,
+                page_yield: Number(document.getElementById('nf-yield').value) || null
+            });
+            toast('Сохранено', 'ok');
+            location.href = '/item/' + encodeURIComponent(ean);
+        } catch (e) { toast(e.message, 'err'); }
+    };
+    document.getElementById('nf-cancel').onclick = () => {
+        form.style.display = 'none';
+        document.getElementById('scanner-view').style.display = 'block';
+        startScanner();
+    };
+}
+
+startScanner();
+</script>
+{% endblock %}

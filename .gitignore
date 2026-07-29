@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime data (пересоздаются при запуске)
+database.db
+backups/
+static/qr_codes/*.png
+
+# TLS-сертификаты и ключи (mkcert, локальный HTTPS)
+*.pem
+mkcert.exe
+
+# OS
+Thumbs.db
+.DS_Store

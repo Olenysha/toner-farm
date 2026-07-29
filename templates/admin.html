@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}Админ-панель — Тонер-фарм{% endblock %}
+{% block content %}
+<h1>Админ-панель</h1>
+
+<div class="card">
+    <h2>Принтеры</h2>
+    <div class="table-wrap"><table id="printers-table">
+        <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>X/Y</th><th>IP</th><th></th></tr></thead>
+        <tbody></tbody>
+    </table></div>
+    <h2 id="pf-title">Добавить принтер</h2>
+    <input type="hidden" id="pf-id">
+    <label>Название</label><input type="text" id="pf-name">
+    <label>Модель</label><input type="text" id="pf-model" placeholder="HP Color LaserJet M452">
+    <label>Тип</label>
+    <select id="pf-type"><option value="mono">Моно (1 слот)</option><option value="color">Цветной (4 слота)</option></select>
+    <label>X, %</label><input type="number" id="pf-x" min="0" max="100" step="0.5" value="50">
+    <label>Y, %</label><input type="number" id="pf-y" min="0" max="100" step="0.5" value="50">
+    <label>IP-адрес (опц.)</label><input type="text" id="pf-ip">
+    <div style="margin-top:12px">
+        <button class="btn" id="pf-save">Сохранить</button>
+        <button class="btn btn-secondary" id="pf-reset">Сброс</button>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Расстановка на карте (перетаскивайте значки)</h2>
+    <div class="minimap" id="minimap">
+        <img id="minimap-img" src="{{ url_for('static', filename='floor_plan.png') }}" alt="">
+    </div>
+</div>
+
+<div class="card">
+    <h2>Остатки на складе</h2>
+    <div class="table-wrap"><table id="stock-table">
+        <thead><tr><th>Модель</th><th>Цвет</th><th>Кол-во, шт.</th></tr></thead>
+        <tbody></tbody>
+    </table></div>
+    <button class="btn btn-secondary" id="stock-export">Экспорт в Excel</button>
+</div>
+
+<div class="card">
+    <h2>План этажа</h2>
+    <form id="fp-form" enctype="multipart/form-data">
+        <input type="file" name="file" accept="image/*" style="min-height:48px">
+        <div style="margin-top:12px"><button class="btn" type="submit">Загрузить новый план</button></div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Справочник штрих-кодов (barcode_map)</h2>
+    <div class="table-wrap"><table id="bm-table">
+        <thead><tr><th>EAN-13</th><th>Модель</th><th>Цвет</th><th>Ресурс</th><th></th></tr></thead>
+        <tbody></tbody>
+    </table></div>
+    <h2>Добавить / изменить EAN</h2>
+    <label>EAN-13</label><input type="text" id="bm-ean">
+    <label>Модель / название</label><input type="text" id="bm-model">
+    <label>Цвет</label>
+    <select id="bm-color">
+        <option value="Black">Black</option><option value="Cyan">Cyan</option>
+        <option value="Magenta">Magenta</option><option value="Yellow">Yellow</option>
+    </select>
+    <label>Совместимые модели принтеров</label>
+    <select id="bm-compat" multiple></select>
+    <label>Ресурс, стр.</label><input type="number" id="bm-yield" min="0">
+    <div style="margin-top:12px"><button class="btn" id="bm-save">Сохранить</button></div>
+</div>
+
+<div class="card">
+    <h2>QR-стикеры</h2>
+    <label>EAN-13</label>
+    <input type="text" id="qr-ean" placeholder="0886111244457">
+    <div style="margin-top:12px">
+        <button class="btn" id="qr-gen">Сгенерировать QR</button>
+        <a class="btn btn-secondary" href="/admin/qr_print" target="_blank">Печать стикеров</a>
+    </div>
+    <div id="qr-out" style="margin-top:16px"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let printersCache = [];
+
+// ---------------- Принтеры ----------------
+async function loadPrinters() {
+    printersCache = await api('/api/printers');
+    const tb = document.querySelector('#printers-table tbody');
+    tb.innerHTML = '';
+    printersCache.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${p.name}</td><td>${p.model}</td>
+            <td>${p.type === 'color' ? 'цветной' : 'моно'}</td>
+            <td>${p.x} / ${p.y}</td><td>${p.ip_address || '—'}</td>
+            <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-secondary" data-edit="${p.id}">Изм.</button>
+                <button class="btn btn-sm btn-danger" data-del="${p.id}">✕</button>
+            </td>`;
+        tb.appendChild(tr);
+    });
+    tb.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editPrinter(+b.dataset.edit));
+    tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => delPrinter(+b.dataset.del));
+    fillModelSelects();
+    renderMinimap();
+}
+
+function editPrinter(id) {
+    const p = printersCache.find(x => x.id === id);
+    if (!p) return;
+    document.getElementById('pf-title').textContent = 'Изменить принтер #' + id;
+    document.getElementById('pf-id').value = id;
+    document.getElementById('pf-name').value = p.name;
+    document.getElementById('pf-model').value = p.model;
+    document.getElementById('pf-type').value = p.type;
+    document.getElementById('pf-x').value = p.x;
+    document.getElementById('pf-y').value = p.y;
+    document.getElementById('pf-ip').value = p.ip_address || '';
+}
+
+function resetPrinterForm() {
+    document.getElementById('pf-title').textContent = 'Добавить принтер';
+    document.getElementById('pf-id').value = '';
+    ['pf-name', 'pf-model', 'pf-ip'].forEach(i => document.getElementById(i).value = '');
+}
+
+document.getElementById('pf-save').onclick = async () => {
+    const id = document.getElementById('pf-id').value;
+    const data = {
+        name: document.getElementById('pf-name').value,
+        model: document.getElementById('pf-model').value,
+        type: document.getElementById('pf-type').value,
+        x: Number(document.getElementById('pf-x').value),
+        y: Number(document.getElementById('pf-y').value),
+        ip_address: document.getElementById('pf-ip').value || null
+    };
+    const btn = document.getElementById('pf-save');
+    btn.disabled = true; btn.textContent = 'Сохранение…';
+    try {
+        if (id) await api('/api/printers/' + id, 'PUT', data);
+        else await api('/api/printers', 'POST', data);
+        toast('Сохранено', 'ok');
+        resetPrinterForm();
+        await loadPrinters();
+    } catch (e) {
+        toast(e.message || 'Ошибка сохранения', 'err');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Сохранить';
+    }
+};
+document.getElementById('pf-reset').onclick = resetPrinterForm;
+
+async function delPrinter(id) {
+    showModal('Удаление', '<p>Удалить принтер?</p>', [
+        { label: 'Да', cls: 'btn-danger', onClick: async () => {
+            try { await api('/api/printers/' + id, 'DELETE'); loadPrinters(); }
+            catch (e) { toast(e.message, 'err'); }
+        }},
+        { label: 'Нет', cls: 'btn-secondary' }]);
+}
+
+// ---------------- Мини-карта с drag-and-drop ----------------
+function renderMinimap() {
+    const mm = document.getElementById('minimap');
+    mm.querySelectorAll('.printer-icon').forEach(e => e.remove());
+    printersCache.forEach(p => {
+        const el = document.createElement('div');
+        el.className = 'printer-icon st-' + p.status_color;
+        el.style.left = p.x + '%';
+        el.style.top = p.y + '%';
+        el.innerHTML = '🖨<span class="printer-label">' + p.name + '</span>';
+        el.addEventListener('pointerdown', ev => {
+            ev.preventDefault();
+            el.setPointerCapture(ev.pointerId);
+            const move = me => {
+                const r = mm.getBoundingClientRect();
+                const x = Math.min(100, Math.max(0, (me.clientX - r.left) / r.width * 100));
+                const y = Math.min(100, Math.max(0, (me.clientY - r.top) / r.height * 100));
+                el.style.left = x + '%'; el.style.top = y + '%';
+                p.x = Math.round(x * 10) / 10; p.y = Math.round(y * 10) / 10;
+            };
+            const up = async () => {
+                el.removeEventListener('pointermove', move);
+                el.removeEventListener('pointerup', up);
+                try {
+                    await api('/api/printers/' + p.id, 'PUT', { x: p.x, y: p.y });
+                    toast(p.name + ': позиция сохранена', 'ok');
+                    loadPrinters();
+                } catch (e) { toast(e.message, 'err'); }
+            };
+            el.addEventListener('pointermove', move);
+            el.addEventListener('pointerup', up);
+        });
+        mm.appendChild(el);
+    });
+}
+
+// ---------------- Остатки на складе ----------------
+async function loadStock() {
+    const rows = await api('/api/stock');
+    const tb = document.querySelector('#stock-table tbody');
+    tb.innerHTML = '';
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.model}</td><td>${colorChip(r.color)}</td><td>${r.count}</td>`;
+        tb.appendChild(tr);
+    });
+    if (!rows.length) tb.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted)">Склад пуст</td></tr>';
+}
+
+document.getElementById('stock-export').onclick = () => {
+    location.href = '/stock/export';
+};
+
+// ---------------- barcode_map ----------------
+function fillModelSelects() {
+    const models = [...new Set(printersCache.map(p => p.model))];
+    const sel = document.getElementById('bm-compat');
+    sel.innerHTML = '';
+    models.forEach(m => {
+        const o = document.createElement('option');
+        o.value = m; o.textContent = m;
+        sel.appendChild(o);
+    });
+}
+
+async function loadBm() {
+    const rows = await api('/api/barcode_map');
+    const tb = document.querySelector('#bm-table tbody');
+    tb.innerHTML = '';
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style="font-family:monospace">${r.ean_13}</td><td>${r.model_name || ''}</td>
+            <td>${colorChip(r.color)}</td><td>${r.page_yield || '—'}</td>
+            <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-secondary" data-edit="${r.ean_13}">Изм.</button>
+                <button class="btn btn-sm btn-danger" data-del="${r.ean_13}">✕</button>
+            </td>`;
+        tr._row = r;
+        tb.appendChild(tr);
+    });
+    tb.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+        const r = b.closest('tr')._row;
+        document.getElementById('bm-ean').value = r.ean_13;
+        document.getElementById('bm-ean').disabled = true;
+        document.getElementById('bm-model').value = r.model_name || '';
+        document.getElementById('bm-color').value = r.color;
+        document.getElementById('bm-yield').value = r.page_yield || '';
+        [...document.getElementById('bm-compat').options].forEach(o =>
+            o.selected = (r.compatible_printers || []).includes(o.value));
+    });
+    tb.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        try { await api('/api/barcode_map/' + b.dataset.del, 'DELETE'); loadBm(); }
+        catch (e) { toast(e.message, 'err'); }
+    });
+}
+
+document.getElementById('bm-save').onclick = async () => {
+    const ean = document.getElementById('bm-ean').value.trim();
+    if (!ean) { toast('Введите EAN', 'err'); return; }
+    const isEdit = document.getElementById('bm-ean').disabled;
+    const data = {
+        ean_13: ean,
+        model_name: document.getElementById('bm-model').value,
+        color: document.getElementById('bm-color').value,
+        compatible_printers: [...document.getElementById('bm-compat').selectedOptions].map(o => o.value),
+        page_yield: Number(document.getElementById('bm-yield').value) || null
+    };
+    try {
+        if (isEdit) await api('/api/barcode_map/' + ean, 'PUT', data);
+        else await api('/api/barcode_map', 'POST', data);
+        toast('Сохранено', 'ok');
+        document.getElementById('bm-ean').disabled = false;
+        ['bm-ean', 'bm-model', 'bm-yield'].forEach(i => document.getElementById(i).value = '');
+        loadBm();
+    } catch (e) { toast(e.message, 'err'); }
+};
+
+// ---------------- План этажа ----------------
+document.getElementById('fp-form').onsubmit = async ev => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const r = await fetch('/api/floor_plan', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (r.ok) {
+        toast('План загружен', 'ok');
+        document.getElementById('minimap-img').src = j.image_path;
+    } else toast(j.error || 'Ошибка загрузки', 'err');
+};
+
+// ---------------- QR ----------------
+document.getElementById('qr-gen').onclick = async () => {
+    const ean = document.getElementById('qr-ean').value.trim();
+    if (!ean) { toast('Введите EAN', 'err'); return; }
+    const j = await api('/api/qr/' + encodeURIComponent(ean));
+    document.getElementById('qr-out').innerHTML =
+        `<img src="${j.url}" style="width:180px" alt="QR"><p style="font-family:monospace">${ean}</p>`;
+};
+
+// активный план в мини-карту
+api('/api/floor_plan').then(fp => { if (fp.image_url) document.getElementById('minimap-img').src = fp.image_url; });
+
+loadPrinters();
+loadBm();
+loadStock();
+</script>
+{% endblock %}

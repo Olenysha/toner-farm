@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Печать QR-стикеров — Тонер-фарм{% endblock %}
+{% block content %}
+<h1 class="no-print">QR-стикеры (A4)</h1>
+<p class="no-print"><button class="btn" onclick="window.print()">Печать</button></p>
+<div class="qr-grid">
+    {% for it in items %}
+    <div class="qr-cell">
+        <img src="{{ it.qr_url }}" alt="{{ it.ean_13 }}">
+        <div class="ean">{{ it.ean_13 }}</div>
+        <div>{{ it.model_name }} ({{ it.color }})</div>
+    </div>
+    {% endfor %}
+</div>
+{% if not items %}<p>Нет записей в справочнике штрих-кодов.</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}История — Тонер-фарм{% endblock %}
+{% block content %}
+<h1>История операций</h1>
+<div class="card filters">
+    <div><label>С даты</label><input type="date" id="f-from"></div>
+    <div><label>По дату</label><input type="date" id="f-to"></div>
+    <div><label>Принтер</label><select id="f-printer"><option value="">Все</option></select></div>
+    <div><label>Тип</label><select id="f-type">
+        <option value="">Все</option>
+        <option value="install">Установка</option>
+        <option value="return">Возврат на склад</option>
+        <option value="auto_depleted">Авто-списание</option>
+    </select></div>
+    <div><button class="btn" id="f-apply">Показать</button></div>
+    <div><button class="btn btn-secondary" id="f-export">Экспорт в Excel</button></div>
+</div>
+<div class="card table-wrap">
+    <table>
+        <thead><tr><th>Дата/время</th><th>Тип</th><th>Тонер</th><th>EAN-13</th><th>Принтер</th><th>Пользователь</th></tr></thead>
+        <tbody id="hist-body"></tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const typeRu = { install: 'Установка', return: 'Возврат на склад', auto_depleted: 'Авто-списание' };
+
+function filterQuery() {
+    const q = new URLSearchParams();
+    if (document.getElementById('f-from').value) q.set('date_from', document.getElementById('f-from').value);
+    if (document.getElementById('f-to').value) q.set('date_to', document.getElementById('f-to').value);
+    if (document.getElementById('f-printer').value) q.set('printer_id', document.getElementById('f-printer').value);
+    if (document.getElementById('f-type').value) q.set('type', document.getElementById('f-type').value);
+    return q.toString();
+}
+
+async function load() {
+    const rows = await api('/api/history?' + filterQuery());
+    const tb = document.getElementById('hist-body');
+    tb.innerHTML = '';
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.timestamp}</td><td>${typeRu[r.type] || r.type}</td>
+            <td>${r.model_name || '—'} ${r.color ? colorChip(r.color) : ''}</td>
+            <td style="font-family:monospace">${r.ean_13 || '—'}</td>
+            <td>${r.printer_name || '—'}</td><td>${r.user_name || '—'}</td>`;
+        tb.appendChild(tr);
+    });
+    if (!rows.length) tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">Нет записей</td></tr>';
+}
+
+api('/api/printers').then(ps => {
+    const sel = document.getElementById('f-printer');
+    ps.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.id; o.textContent = p.name;
+        sel.appendChild(o);
+    });
+});
+
+document.getElementById('f-apply').onclick = load;
+document.getElementById('f-export').onclick = () => {
+    location.href = '/history/export?' + filterQuery();
+};
+
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Статистика — Тонер-фарм{% endblock %}
+{% block content %}
+<h1>Статистика</h1>
+<div class="card">
+    <h2>Замены по месяцам</h2>
+    <canvas id="ch-months" height="120"></canvas>
+</div>
+<div class="card">
+    <h2>Средний срок службы тонера по моделям</h2>
+    <!-- v2: прогноз даты замены на основе page_yield и темпа печати -->
+    <div class="table-wrap"><table>
+        <thead><tr><th>Модель</th><th>Средний срок, дней</th><th>Замен учтено</th></tr></thead>
+        <tbody id="lifespan-body"></tbody>
+    </table></div>
+</div>
+<div class="card">
+    <h2>Топ принтеров по числу замен</h2>
+    <canvas id="ch-printers" height="120"></canvas>
+</div>
+<div class="card">
+    <h2>Остатки на складе по моделям</h2>
+    <canvas id="ch-stock" height="120"></canvas>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+<script>
+async function load() {
+    const s = await api('/api/stats');
+
+    new Chart(document.getElementById('ch-months'), {
+        type: 'bar',
+        data: {
+            labels: s.replacements_per_month.map(r => r.month),
+            datasets: [{ label: 'Замены', data: s.replacements_per_month.map(r => r.count),
+                         backgroundColor: '#2563eb' }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+
+    const lb = document.getElementById('lifespan-body');
+    lb.innerHTML = s.lifespan_by_model.length ? '' : '<tr><td colspan="3" style="color:var(--muted)">Пока нет данных о списаниях</td></tr>';
+    s.lifespan_by_model.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.model}</td><td>${r.avg_days}</td><td>${r.samples}</td>`;
+        lb.appendChild(tr);
+    });
+
+    new Chart(document.getElementById('ch-printers'), {
+        type: 'bar',
+        data: {
+            labels: s.top_printers.map(r => r.name),
+            datasets: [{ label: 'Замены', data: s.top_printers.map(r => r.count),
+                         backgroundColor: '#d97706' }]
+        },
+        options: { indexAxis: 'y', plugins: { legend: { display: false } },
+                   scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+
+    new Chart(document.getElementById('ch-stock'), {
+        type: 'bar',
+        data: {
+            labels: s.stock_by_model.map(r => r.model + ' (' + r.color + ')'),
+            datasets: [{ label: 'Штук на складе', data: s.stock_by_model.map(r => r.count),
+                         backgroundColor: '#16a34a' }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+    });
+}
+load();
+</script>
+{% endblock %}

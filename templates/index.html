@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Карта — Тонер-фарм{% endblock %}
+{% block content %}
+<h1>Карта этажа</h1>
+<p id="mode-hint" style="display:none" class="card">
+    Режим выбора принтера: нажмите на <b>подсвеченный</b> совместимый принтер.
+    <button class="btn btn-secondary btn-sm" onclick="location.href='/'">Отмена</button>
+</p>
+<div class="map-wrap" id="map-wrap">
+    <div class="map-canvas" id="map-canvas">
+        <img id="floor-img" src="{{ url_for('static', filename='floor_plan.png') }}" alt="План этажа">
+    </div>
+</div>
+<p style="color:var(--muted);font-size:14px">
+    <span class="dot dot-green"></span>всё в порядке
+    <span class="dot dot-yellow" style="margin-left:10px"></span>тонер стареет (&gt;60 дн.)
+    <span class="dot dot-red" style="margin-left:10px"></span>пустой слот
+    <span class="dot dot-grey" style="margin-left:10px"></span>нет данных
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const params = new URLSearchParams(location.search);
+const selectMode = params.get('mode') === 'select';
+const selectTonerId = params.get('toner_id');
+let tonerInfo = null;
+
+if (selectMode) {
+    document.getElementById('mode-hint').style.display = 'block';
+    getUserName();
+}
+
+async function load() {
+    // активный план этажа
+    try {
+        const fp = await api('/api/floor_plan');
+        if (fp.image_url) document.getElementById('floor-img').src = fp.image_url;
+    } catch (e) {}
+
+    let printers = await api('/api/printers');
+
+    if (selectMode && selectTonerId) {
+        // совместимость: модель принтера в compatible_printers + нужный слот по цвету
+        const lk = await api('/api/lookup_by_id/' + selectTonerId).catch(() => null);
+        tonerInfo = lk;
+    }
+    renderIcons(printers);
+}
+
+function isCompatible(p) {
+    if (!tonerInfo || !tonerInfo.barcode) return false;
+    const bc = tonerInfo.barcode;
+    if (!bc.compatible_printers.includes(p.model)) return false;
+    if (p.type === 'mono') return bc.color === 'Black';
+    return true; // цветной: любой цветовой слот
+}
+
+function renderIcons(printers) {
+    const canvas = document.getElementById('map-canvas');
+    canvas.querySelectorAll('.printer-icon').forEach(e => e.remove());
+    printers.forEach(p => {
+        const el = document.createElement('div');
+        el.className = 'printer-icon st-' + p.status_color;
+        el.style.left = p.x + '%';
+        el.style.top = p.y + '%';
+        el.innerHTML = '🖨<span class="printer-label">' + p.name + '</span>';
+        if (selectMode) {
+            if (isCompatible(p)) {
+                el.classList.add('compatible');
+                el.onclick = () => confirmInstall(p);
+            } else {
+                el.classList.add('disabled');
+            }
+        } else {
+            el.onclick = () => showPrinter(p);
+        }
+        canvas.appendChild(el);
+    });
+}
+
+function slotsHtml(p) {
+    const rows = [['Чёрный', p.slot_bk], ['Голубой', p.slot_c],
+                  ['Пурпурный', p.slot_m], ['Жёлтый', p.slot_y]];
+    const need = p.type === 'color' ? 4 : 1;
+    return rows.slice(0, need).map(([name, t]) => {
+        const val = t ? `${t.model_name || t.ean_13}<br><small>с ${t.installed_at || '—'}</small>` : '<b style="color:var(--err)">пусто</b>';
+        return `<tr><td>${name}</td><td>${val}</td></tr>`;
+    }).join('');
+}
+
+function showPrinter(p) {
+    showModal(p.name, `
+        <p>${statusDot(p.status_color)}<br>
+        <b>${p.model}</b> (${p.type === 'color' ? 'цветной' : 'моно'})</p>
+        <table>${slotsHtml(p)}</table>`,
+        [{ label: 'Заменить тонер', cls: 'btn-ok', onClick: () => location.href = '/scan' },
+         { label: 'Закрыть', cls: 'btn-secondary' }]);
+}
+
+function confirmInstall(p) {
+    const bc = tonerInfo.barcode;
+    showModal('Подтверждение',
+        `<p style="font-size:18px">Установить <b>${bc.model_name}</b> ${colorChip(bc.color)}<br>в <b>${p.name}</b>?</p>`,
+        [{ label: 'Да', cls: 'btn-ok', keepOpen: true, onClick: async () => {
+            try {
+                const r = await api('/api/install', 'POST', {
+                    toner_id: Number(selectTonerId), printer_id: p.id, user_name: getUserName() });
+                showModal('Готово ✓', '<p style="font-size:18px">Тонер установлен.</p>', []);
+                setTimeout(() => location.href = '/', 1500);
+            } catch (e) { toast(e.message, 'err'); closeModal(); }
+        }},
+        { label: 'Нет', cls: 'btn-secondary' }]);
+}
+
+// ---------- pinch-zoom + pan (CSS transform) ----------
+(function () {
+    const wrap = document.getElementById('map-wrap');
+    const canvas = document.getElementById('map-canvas');
+    let scale = 1, tx = 0, ty = 0;
+    const pointers = new Map();
+    let startDist = 0, startScale = 1, startTx = 0, startTy = 0, startX = 0, startY = 0;
+
+    function apply() {
+        tx = Math.min(0, Math.max(tx, wrap.clientWidth - canvas.clientWidth * scale));
+        ty = Math.min(0, Math.max(ty, wrap.clientHeight - canvas.clientHeight * scale));
+        canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    }
+    function dist() {
+        const [a, b] = [...pointers.values()];
+        return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+    wrap.addEventListener('pointerdown', e => {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        wrap.setPointerCapture(e.pointerId);
+        if (pointers.size === 1) { startX = e.clientX - tx; startY = e.clientY - ty; }
+        if (pointers.size === 2) { startDist = dist(); startScale = scale; startTx = tx; startTy = ty; }
+    });
+    wrap.addEventListener('pointermove', e => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) {
+            scale = Math.min(4, Math.max(1, startScale * dist() / startDist));
+            apply();
+        } else if (pointers.size === 1 && scale > 1) {
+            tx = e.clientX - startX; ty = e.clientY - startY;
+            apply();
+        }
+    });
+    const up = e => pointers.delete(e.pointerId);
+    wrap.addEventListener('pointerup', up);
+    wrap.addEventListener('pointercancel', up);
+})();
+
+load();
+</script>
+{% endblock %}
