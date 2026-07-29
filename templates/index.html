@@ -28,7 +28,6 @@ let tonerInfo = null;
 
 if (selectMode) {
     document.getElementById('mode-hint').style.display = 'block';
-    getUserName();
 }
 
 async function load() {
@@ -105,7 +104,7 @@ function confirmInstall(p) {
         [{ label: 'Да', cls: 'btn-ok', keepOpen: true, onClick: async () => {
             try {
                 const r = await api('/api/install', 'POST', {
-                    toner_id: Number(selectTonerId), printer_id: p.id, user_name: getUserName() });
+                    toner_id: Number(selectTonerId), printer_id: p.id });
                 showModal('Готово ✓', '<p style="font-size:18px">Тонер установлен.</p>', []);
                 setTimeout(() => location.href = '/', 1500);
             } catch (e) { toast(e.message, 'err'); closeModal(); }

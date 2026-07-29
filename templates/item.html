@@ -43,7 +43,7 @@ async function load() {
         showModal('Подтверждение', '<p style="font-size:18px">Вернуть на склад?</p>', [
             { label: 'Да', cls: 'btn-ok', keepOpen: true, onClick: async () => {
                 try {
-                    await api('/api/return', 'POST', { toner_id: t.id, user_name: getUserName() });
+                    await api('/api/return', 'POST', { toner_id: t.id });
                     closeModal();
                     document.getElementById('done').innerHTML =
                         '<div class="card" style="text-align:center"><h1>Готово ✓</h1></div>';

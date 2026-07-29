@@ -26,7 +26,7 @@ FLOOR_PLAN_PATH = os.path.join(STATIC_DIR, 'floor_plan.png')
 # Сколько дней тонер считается «стареющим» (жёлтый статус на карте)
 AGING_DAYS = 60
 
-# v2: авторизация / AD-интеграция — сейчас пилот без логина, user_name хранится в localStorage на клиенте
+# v2: авторизация / AD-интеграция — сейчас пилот без логина, операции пишутся без подписи пользователя
 
 app = Flask(__name__)
 
@@ -361,7 +361,6 @@ def api_install():
     data = request.get_json(force=True)
     toner_id = data.get('toner_id')
     printer_id = data.get('printer_id')
-    user = data.get('user_name') or 'неизвестно'
     db = get_db()
     toner = db.execute('SELECT * FROM toners WHERE id = ?', (toner_id,)).fetchone()
     printer = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
@@ -383,15 +382,15 @@ def api_install():
         db.execute("UPDATE toners SET status='depleted', current_printer_id=NULL WHERE id=?",
                    (old_toner_id,))
         db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, user_name) VALUES (?,?,?,?,?)",
-            (old_toner_id, printer_id, 'auto_depleted', None, user))
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
+            (old_toner_id, printer_id, 'auto_depleted', None))
     db.execute(
         "UPDATE toners SET status='installed', current_printer_id=?, installed_at=? WHERE id=?",
         (printer_id, now, toner_id))
     db.execute(f'UPDATE printers SET {col}=? WHERE id=?', (toner_id, printer_id))
     db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, user_name) VALUES (?,?,?,?,?)",
-        (toner_id, printer_id, 'install', old_toner_id, user))
+        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
+        (toner_id, printer_id, 'install', old_toner_id))
     db.commit()
     p = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
     return jsonify({'ok': True, 'auto_depleted_id': old_toner_id,
@@ -403,7 +402,6 @@ def api_return():
     """Возврат тонера на склад, слот принтера освобождается."""
     data = request.get_json(force=True)
     toner_id = data.get('toner_id')
-    user = data.get('user_name') or 'неизвестно'
     db = get_db()
     toner = db.execute('SELECT * FROM toners WHERE id = ?', (toner_id,)).fetchone()
     if not toner:
@@ -419,8 +417,8 @@ def api_return():
         "UPDATE toners SET status='stock', current_printer_id=NULL, installed_at=NULL WHERE id=?",
         (toner_id,))
     db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, user_name) VALUES (?,?,?,?,?)",
-        (toner_id, printer_id, 'return', None, user))
+        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
+        (toner_id, printer_id, 'return', None))
     db.commit()
     return jsonify({'ok': True})
 
@@ -636,13 +634,13 @@ def history_export():
     ws = wb.active
     ws.title = 'История операций'
     ws.append(['Дата/время', 'Тип', 'Модель тонера', 'EAN-13', 'Цвет',
-               'Принтер', 'Пользователь', 'ID старого тонера'])
+               'Принтер', 'ID старого тонера'])
     type_ru = {'install': 'Установка', 'return': 'Возврат на склад',
                'auto_depleted': 'Авто-списание'}
     for r in rows:
         ws.append([r['timestamp'], type_ru.get(r['type'], r['type']),
                    r['model_name'], r['ean_13'], r['color'],
-                   r['printer_name'], r['user_name'], r['old_toner_id']])
+                   r['printer_name'], r['old_toner_id']])
     for col_cells in ws.columns:
         width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
         ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
@@ -694,9 +692,25 @@ init_db()
 ensure_floor_plan()
 
 if __name__ == '__main__':
-    cert = os.path.join(BASE_DIR, '192.168.1.60+2.pem')
-    key = os.path.join(BASE_DIR, '192.168.1.60+2-key.pem')
-    ssl_ctx = (cert, key) if os.path.exists(cert) and os.path.exists(key) else None
+    import socket
+    # Авто-определение локального IP: сертификат ищется по текущему IP,
+    # поэтому при смене сети достаточно один раз запустить setup-https.bat
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        local_ip = s.getsockname()[0]
+    except Exception:
+        local_ip = '127.0.0.1'
+    finally:
+        s.close()
 
+    cert = os.path.join(BASE_DIR, f'{local_ip}+2.pem')
+    key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
+    if os.path.exists(cert) and os.path.exists(key):
+        ssl_ctx = (cert, key)
+        print(f'HTTPS: https://{local_ip}:5000')
+    else:
+        ssl_ctx = None
+        print(f'HTTP: http://{local_ip}:5000 (сканер на телефоне не заработает без HTTPS — запусти setup-https.bat)')
 
     app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)

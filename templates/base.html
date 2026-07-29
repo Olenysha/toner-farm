@@ -34,28 +34,7 @@ if (location.protocol === 'http:' && location.hostname !== 'localhost' && locati
     location.replace('https://' + location.host + location.pathname + location.search);
 }
 
-// ---------- Общие хелперы: пользователь, модалка, тост ----------
-function getUserName() {
-// ---------- Общие хелперы: пользователь, модалка, тост ----------
-function getUserName() {
-    // Для маленького IT-отдела: без prompt, фиксированное имя.
-    // При необходимости поменять вручную в консоли: localStorage.setItem('tf_user_name', 'Иван')
-    let name = localStorage.getItem('tf_user_name');
-    if (!name) {
-        name = 'IT-отдел';
-        localStorage.setItem('tf_user_name', name);
-    }
-    return name;
-}
-    let name = localStorage.getItem('tf_user_name');
-    if (!name) {
-        name = prompt('Представьтесь, пожалуйста (имя для журнала операций):', '');
-        if (!name) name = 'аноним';
-        localStorage.setItem('tf_user_name', name);
-    }
-    return name;
-}
-
+// ---------- Общие хелперы: модалка, тост ----------
 function showModal(title, bodyHtml, buttons) {
     // buttons: [{label, cls, onClick}] — пустой массив = только закрытие по клику на фон
     document.getElementById('modal-title').textContent = title;
