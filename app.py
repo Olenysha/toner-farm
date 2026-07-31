@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS operations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     toner_id INTEGER,
     printer_id INTEGER,
-    type TEXT,                          -- install / return / auto_depleted
+    type TEXT,                          -- install / return / auto_depleted / stock_add / depleted
     old_toner_id INTEGER,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     user_name TEXT
@@ -290,6 +290,11 @@ def stats():
     return render_template('stats.html')
 
 
+@app.route('/availability')
+def availability():
+    return render_template('availability.html')
+
+
 @app.route('/admin/qr_print')
 def qr_print():
     db = get_db()
@@ -312,15 +317,22 @@ def api_lookup(ean):
     bc = get_barcode(db, ean)
     if not bc:
         return jsonify({'found': False, 'ean_13': ean})
-    toner = db.execute(
-        "SELECT * FROM toners WHERE ean_13 = ? AND status != 'depleted' ORDER BY id DESC LIMIT 1",
+    # EAN общий для всех тонеров модели+цвета: считаем остаток на складе,
+    # отдельно находим установленный экземпляр (если есть)
+    stock_rows = db.execute(
+        "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock' ORDER BY id",
+        (ean,)).fetchall()
+    installed = db.execute(
+        "SELECT * FROM toners WHERE ean_13 = ? AND status = 'installed' ORDER BY id DESC LIMIT 1",
         (ean,)).fetchone()
-    resp = {'found': True, 'barcode': bc, 'toner': None, 'printer': None}
-    if toner:
-        resp['toner'] = toner_with_info(db, toner)
-        if toner['status'] == 'installed' and toner['current_printer_id']:
+    resp = {'found': True, 'barcode': bc, 'toner': None, 'printer': None,
+            'stock_count': len(stock_rows),
+            'stock_toner_id': stock_rows[-1]['id'] if stock_rows else None}
+    if installed:
+        resp['toner'] = toner_with_info(db, installed)
+        if installed['current_printer_id']:
             p = db.execute('SELECT * FROM printers WHERE id = ?',
-                           (toner['current_printer_id'],)).fetchone()
+                           (installed['current_printer_id'],)).fetchone()
             resp['printer'] = row_to_dict(p)
     return jsonify(resp)
 
@@ -337,11 +349,14 @@ def api_lookup_by_id(tid):
 
 @app.route('/api/barcode_map', methods=['POST'])
 def api_barcode_map_create():
-    """Обучение нового EAN: запись в barcode_map + тонер на склад."""
+    """Обучение нового EAN: запись в barcode_map + тонеры на склад (quantity шт.)."""
     data = request.get_json(force=True)
     ean = (data.get('ean_13') or '').strip()
     if not ean:
         return jsonify({'error': 'ean_13 обязателен'}), 400
+    qty = int(data.get('quantity') or 1)
+    if qty < 1:
+        return jsonify({'error': 'Количество должно быть ≥ 1'}), 400
     compat = data.get('compatible_printers') or []
     if isinstance(compat, str):
         compat = [compat]
@@ -350,9 +365,57 @@ def api_barcode_map_create():
         'INSERT OR REPLACE INTO barcode_map (ean_13, model_name, color, compatible_printers, page_yield) VALUES (?,?,?,?,?)',
         (ean, data.get('model_name'), data.get('color'),
          json.dumps(compat, ensure_ascii=False), data.get('page_yield')))
-    db.execute("INSERT INTO toners (ean_13, status) VALUES (?, 'stock')", (ean,))
+    _add_stock(db, ean, qty)
     db.commit()
     return jsonify({'ok': True, 'barcode': get_barcode(db, ean)})
+
+
+def _add_stock(db, ean, qty):
+    """Приход qty штук на склад + запись в operations."""
+    for _ in range(qty):
+        cur = db.execute("INSERT INTO toners (ean_13, status) VALUES (?, 'stock')", (ean,))
+        db.execute(
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
+            (cur.lastrowid, None, 'stock_add', None))
+
+
+@app.route('/api/stock/add', methods=['POST'])
+def api_stock_add():
+    """Приход на склад: qty штук по известному EAN (код общий для модели+цвета)."""
+    data = request.get_json(force=True)
+    ean = (data.get('ean_13') or '').strip()
+    qty = int(data.get('quantity') or 0)
+    if qty < 1:
+        return jsonify({'error': 'Количество должно быть ≥ 1'}), 400
+    db = get_db()
+    if not get_barcode(db, ean):
+        return jsonify({'error': 'EAN не найден в справочнике'}), 404
+    _add_stock(db, ean, qty)
+    db.commit()
+    return jsonify({'ok': True, 'added': qty})
+
+
+@app.route('/api/stock/deplete', methods=['POST'])
+def api_stock_deplete():
+    """Ручное списание qty штук со склада по EAN (списываются самые старые)."""
+    data = request.get_json(force=True)
+    ean = (data.get('ean_13') or '').strip()
+    qty = int(data.get('quantity') or 0)
+    if qty < 1:
+        return jsonify({'error': 'Количество должно быть ≥ 1'}), 400
+    db = get_db()
+    rows = db.execute(
+        "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock' ORDER BY id",
+        (ean,)).fetchall()
+    if len(rows) < qty:
+        return jsonify({'error': f'На складе только {len(rows)} шт.'}), 400
+    for r in rows[:qty]:
+        db.execute("UPDATE toners SET status='depleted' WHERE id=?", (r['id'],))
+        db.execute(
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
+            (r['id'], None, 'depleted', None))
+    db.commit()
+    return jsonify({'ok': True, 'depleted': qty})
 
 
 @app.route('/api/install', methods=['POST'])
@@ -636,7 +699,8 @@ def history_export():
     ws.append(['Дата/время', 'Тип', 'Модель тонера', 'EAN-13', 'Цвет',
                'Принтер', 'ID старого тонера'])
     type_ru = {'install': 'Установка', 'return': 'Возврат на склад',
-               'auto_depleted': 'Авто-списание'}
+               'auto_depleted': 'Авто-списание', 'stock_add': 'Приход на склад',
+               'depleted': 'Списание'}
     for r in rows:
         ws.append([r['timestamp'], type_ru.get(r['type'], r['type']),
                    r['model_name'], r['ean_13'], r['color'],
@@ -650,6 +714,38 @@ def history_export():
     fname = f'toner_history_{date.today().isoformat()}.xlsx'
     return send_file(buf, as_attachment=True, download_name=fname,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/api/availability')
+def api_availability():
+    """Наличие тонеров на складе сгруппировано по моделям принтеров.
+
+    Принтеры с разными именами, но одинаковой моделью объединяются в одну
+    группу. Для каждого цвета суммируются остатки всех EAN (в т.ч. аналогов
+    других производителей), у которых модель принтера есть в compatible_printers.
+    """
+    db = get_db()
+    stock_by_ean = {r['ean_13']: r['c'] for r in db.execute(
+        "SELECT ean_13, COUNT(*) AS c FROM toners WHERE status='stock' GROUP BY ean_13")}
+    bcs = [get_barcode(db, r['ean_13'])
+           for r in db.execute('SELECT ean_13 FROM barcode_map')]
+    groups = {}
+    for p in db.execute('SELECT * FROM printers ORDER BY name'):
+        g = groups.setdefault(p['model'], {
+            'model': p['model'], 'type': p['type'], 'printers': [], 'colors': {}})
+        g['printers'].append(p['name'])
+        if p['type'] == 'color':
+            g['type'] = 'color'
+    for g in groups.values():
+        needed = ['Black'] if g['type'] == 'mono' else list(SLOT_COLUMN)
+        colors = {c: 0 for c in needed}
+        for bc in bcs:
+            if not bc or bc['color'] not in colors:
+                continue
+            if g['model'] in (bc['compatible_printers'] or []):
+                colors[bc['color']] += stock_by_ean.get(bc['ean_13'], 0)
+        g['colors'] = colors
+    return jsonify(sorted(groups.values(), key=lambda g: g['model'] or ''))
 
 
 @app.route('/api/stock')
@@ -692,25 +788,37 @@ init_db()
 ensure_floor_plan()
 
 if __name__ == '__main__':
-    import socket
-    # Авто-определение локального IP: сертификат ищется по текущему IP,
-    # поэтому при смене сети достаточно один раз запустить setup-https.bat
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('8.8.8.8', 80))
-        local_ip = s.getsockname()[0]
-    except Exception:
-        local_ip = '127.0.0.1'
-    finally:
-        s.close()
+    import os, socket
 
+    # IP, для которого создан сертификат (setup-https сохраняет его в last_ip.txt)
+    ip_file = os.path.join(BASE_DIR, 'last_ip.txt')
+    if os.path.exists(ip_file):
+        with open(ip_file, 'r', encoding='utf-8-sig') as f:
+            local_ip = f.read().strip()
+        if not local_ip:
+            local_ip = None
+    else:
+        local_ip = None
+
+    # Fallback: авто-определение текущего IP
+    if not local_ip:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('8.8.8.8', 80))
+            local_ip = s.getsockname()[0]
+        except Exception:
+            local_ip = '127.0.0.1'
+        finally:
+            s.close()
+
+    # Ищем сертификат для выбранного IP
     cert = os.path.join(BASE_DIR, f'{local_ip}+2.pem')
     key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
     if os.path.exists(cert) and os.path.exists(key):
         ssl_ctx = (cert, key)
-        print(f'HTTPS: https://{local_ip}:5000')
+        print(f'🔒 HTTPS: https://{local_ip}:5000')
     else:
         ssl_ctx = None
-        print(f'HTTP: http://{local_ip}:5000 (сканер на телефоне не заработает без HTTPS — запусти setup-https.bat)')
+        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')
 
     app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)

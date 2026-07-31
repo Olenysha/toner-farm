@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
   setup-https.ps1
   Одна кнопка — HTTPS для Тонер-фарм.
@@ -38,6 +38,7 @@ function Get-LocalIP {
 }
 
 $localIP = Get-LocalIP
+$localIP | Set-Content -Path (Join-Path $scriptDir 'last_ip.txt') -Encoding UTF8 -NoNewline
 if (-not $localIP) {
     Write-Host "❌ Не удалось определить локальный IP. Убедись, что Wi-Fi подключен." -ForegroundColor Red
     exit 1
@@ -88,7 +89,7 @@ Write-Host "   $keyPem" -ForegroundColor DarkGray
 # ── 5. Копируем CA для телефона ──────────────────────────────────────
 $caRoot = & $mkcertExe -CAROOT
 $caPemSrc = Join-Path $caRoot 'rootCA.pem'
-$caPemDst = Join-Path $scriptDir 'static' 'rootCA.pem'
+$caPemDst = Join-Path (Join-Path $scriptDir 'static') 'rootCA.pem'
 if (Test-Path $caPemSrc) {
     Copy-Item -Path $caPemSrc -Destination $caPemDst -Force
     Write-Host "✅ CA-файл для телефона скопирован в static/rootCA.pem" -ForegroundColor Green
@@ -96,38 +97,60 @@ if (Test-Path $caPemSrc) {
 
 # ── 6. Патчим app.py ─────────────────────────────────────────────────
 $appPy = Join-Path $scriptDir 'app.py'
-$appContent = Get-Content -Path $appPy -Raw -Encoding UTF8
+$appLines = Get-Content -Path $appPy -Encoding UTF8
+$startIndex = -1
+for ($i = 0; $i -lt $appLines.Count; $i++) {
+    if ($appLines[$i] -match "if __name__ == '__main__':") {
+        $startIndex = $i
+        break
+    }
+}
 
-# Удаляем старый блок запуска (если есть наш патч)
-$oldPattern = "if __name__ == '__main__':\s*\n(?:    .*\n)*"
-$newBlock = @"
-if __name__ == '__main__':
-    import socket
-    # Авто-определение локального IP для HTTPS
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('8.8.8.8', 80))
-        local_ip = s.getsockname()[0]
-    except Exception:
-        local_ip = '127.0.0.1'
-    finally:
-        s.close()
+$newBlock = @(
+    "if __name__ == '__main__':",
+    "    import os, socket",
+    "",
+    "    # IP, для которого создан сертификат (setup-https сохраняет его в last_ip.txt)",
+    "    ip_file = os.path.join(BASE_DIR, 'last_ip.txt')",
+    "    if os.path.exists(ip_file):",
+    "        with open(ip_file, 'r', encoding='utf-8-sig') as f:",
+    "            local_ip = f.read().strip()",
+    "        if not local_ip:",
+    "            local_ip = None",
+    "    else:",
+    "        local_ip = None",
+    "",
+    "    # Fallback: авто-определение текущего IP",
+    "    if not local_ip:",
+    "        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)",
+    "        try:",
+    "            s.connect(('8.8.8.8', 80))",
+    "            local_ip = s.getsockname()[0]",
+    "        except Exception:",
+    "            local_ip = '127.0.0.1'",
+    "        finally:",
+    "            s.close()",
+    "",
+    "    # Ищем сертификат для выбранного IP",
+    "    cert = os.path.join(BASE_DIR, f'{local_ip}+2.pem')",
+    "    key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')",
+    "    if os.path.exists(cert) and os.path.exists(key):",
+    "        ssl_ctx = (cert, key)",
+    "        print(f'🔒 HTTPS: https://{local_ip}:5000')",
+    "    else:",
+    "        ssl_ctx = None",
+    "        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')",
+    "",
+    "    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)"
+)
 
-    # Ищем сертификат для текущего IP
-    cert_file = os.path.join(BASE_DIR, f'{local_ip}+2.pem')
-    key_file  = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
-    if os.path.exists(cert_file) and os.path.exists(key_file):
-        ssl_ctx = (cert_file, key_file)
-        print(f'🔒 HTTPS: https://{local_ip}:5000')
-    else:
-        ssl_ctx = None
-        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS)')
-    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)
-"@
-
-if ($appContent -match "if __name__ == '__main__':") {
-    $appContent = [regex]::Replace($appContent, $oldPattern, $newBlock)
-    Set-Content -Path $appPy -Value $appContent -Encoding UTF8 -NoNewline
+if ($startIndex -ge 0) {
+    if ($startIndex -eq 0) {
+        $newLines = $newBlock
+    } else {
+        $newLines = $appLines[0..($startIndex - 1)] + $newBlock
+    }
+    Set-Content -Path $appPy -Value $newLines -Encoding UTF8
     Write-Host "✅ app.py обновлён для HTTPS" -ForegroundColor Green
 } else {
     Write-Host "⚠️  Не удалось найти блок запуска в app.py — проверь вручную." -ForegroundColor Yellow

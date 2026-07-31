@@ -11,6 +11,8 @@
         <option value="install">Установка</option>
         <option value="return">Возврат на склад</option>
         <option value="auto_depleted">Авто-списание</option>
+        <option value="stock_add">Приход на склад</option>
+        <option value="depleted">Списание</option>
     </select></div>
     <div><button class="btn" id="f-apply">Показать</button></div>
     <div><button class="btn btn-secondary" id="f-export">Экспорт в Excel</button></div>
@@ -25,7 +27,8 @@
 
 {% block scripts %}
 <script>
-const typeRu = { install: 'Установка', return: 'Возврат на склад', auto_depleted: 'Авто-списание' };
+const typeRu = { install: 'Установка', return: 'Возврат на склад', auto_depleted: 'Авто-списание',
+                 stock_add: 'Приход на склад', depleted: 'Списание' };
 
 function filterQuery() {
     const q = new URLSearchParams();

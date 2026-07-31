@@ -17,6 +17,13 @@
     <span class="dot dot-red" style="margin-left:10px"></span>пустой слот
     <span class="dot dot-grey" style="margin-left:10px"></span>нет данных
 </p>
+<div class="card" id="size-panel" style="display:none">
+    <label for="icon-size">Размер иконок: <span id="icon-size-val"></span>px</label>
+    <input type="range" id="icon-size" min="20" max="80" step="2">
+    <label for="label-size">Размер надписей: <span id="label-size-val"></span>px</label>
+    <input type="range" id="label-size" min="8" max="24" step="1">
+</div>
+<button class="btn btn-secondary btn-sm" id="btn-sizes" style="margin-bottom:16px">⚙ Размеры иконок</button>
 {% endblock %}
 
 {% block scripts %}
@@ -111,6 +118,38 @@ function confirmInstall(p) {
         }},
         { label: 'Нет', cls: 'btn-secondary' }]);
 }
+
+// ---------- настройка размеров иконок/надписей (localStorage) ----------
+(function () {
+    const canvas = document.getElementById('map-canvas');
+    const iconInp = document.getElementById('icon-size');
+    const labelInp = document.getElementById('label-size');
+    const DEF_ICON = 44, DEF_LABEL = 11;
+
+    function apply() {
+        const icon = Number(localStorage.getItem('mapIconSize')) || DEF_ICON;
+        const label = Number(localStorage.getItem('mapLabelSize')) || DEF_LABEL;
+        canvas.style.setProperty('--icon-size', icon + 'px');
+        canvas.style.setProperty('--label-size', label + 'px');
+        iconInp.value = icon;
+        labelInp.value = label;
+        document.getElementById('icon-size-val').textContent = icon;
+        document.getElementById('label-size-val').textContent = label;
+    }
+    iconInp.addEventListener('input', () => {
+        localStorage.setItem('mapIconSize', iconInp.value);
+        apply();
+    });
+    labelInp.addEventListener('input', () => {
+        localStorage.setItem('mapLabelSize', labelInp.value);
+        apply();
+    });
+    document.getElementById('btn-sizes').onclick = () => {
+        const p = document.getElementById('size-panel');
+        p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    };
+    apply();
+})();
 
 // ---------- pinch-zoom + pan (CSS transform) ----------
 (function () {

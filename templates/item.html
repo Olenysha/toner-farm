@@ -21,22 +21,56 @@ async function load() {
         <h1>${bc.model_name || 'Тонер'} ${colorChip(bc.color)}</h1>
         <p style="color:var(--muted);font-family:monospace">${ean}</p>
         <p><b>Совместимые принтеры:</b><br>${(bc.compatible_printers || []).join('<br>') || '—'}</p>
-        <p><b>Ресурс:</b> ${bc.page_yield ? bc.page_yield + ' стр.' : '—'}</p>`;
+        <p><b>Ресурс:</b> ${bc.page_yield ? bc.page_yield + ' стр.' : '—'}</p>
+        <p><b>На складе:</b> ${r.stock_count} шт.</p>`;
 
-    if (t && t.status === 'installed' && p) {
-        html += `<p><b>Установлен в:</b> ${p.name} (${p.model})<br><b>С:</b> ${t.installed_at || '—'}</p>
-        <button class="btn btn-block btn-danger" id="btn-return">Вернуть на склад</button>`;
-    } else if (t && t.status === 'stock') {
-        html += `<p><b>Статус:</b> на складе (шт.: ${t.quantity})</p>
-        <button class="btn btn-block" id="btn-install">Установить в принтер</button>`;
-    } else {
-        html += `<p><b>Статус:</b> нет в наличии</p>`;
+    if (t && p) {
+        html += `<p><b>Установлен в:</b> ${p.name} (${p.model})<br><b>С:</b> ${t.installed_at || '—'}</p>`;
+    }
+
+    // EAN общий для модели+цвета: приход/списание по количеству
+    html += `<label for="qty">Количество, шт.</label>
+        <input type="number" id="qty" min="1" value="1" inputmode="numeric">
+        <div style="display:flex;gap:10px;margin-top:12px">
+            <button class="btn" style="flex:1" id="btn-add">Добавить</button>
+            <button class="btn btn-danger" style="flex:1" id="btn-deplete">Списать</button>
+        </div>`;
+
+    if (r.stock_toner_id) {
+        html += `<button class="btn btn-block" style="margin-top:12px" id="btn-install">Установить в принтер</button>`;
+    }
+    if (t && p) {
+        html += `<button class="btn btn-block btn-secondary" style="margin-top:12px" id="btn-return">Вернуть из принтера на склад</button>`;
     }
     html += `</div><div id="done"></div>`;
     box.innerHTML = html;
 
+    const qty = () => Math.max(1, parseInt(document.getElementById('qty').value, 10) || 1);
+
+    document.getElementById('btn-add').onclick = async () => {
+        try {
+            const j = await api('/api/stock/add', 'POST', { ean_13: ean, quantity: qty() });
+            toast(`Добавлено: ${j.added} шт.`, 'ok');
+            load();
+        } catch (e) { toast(e.message, 'err'); }
+    };
+
+    document.getElementById('btn-deplete').onclick = () => {
+        const n = qty();
+        showModal('Списание', `<p style="font-size:18px">Списать со склада ${n} шт.?</p>`, [
+            { label: 'Да', cls: 'btn-danger', keepOpen: true, onClick: async () => {
+                try {
+                    const j = await api('/api/stock/deplete', 'POST', { ean_13: ean, quantity: n });
+                    closeModal();
+                    toast(`Списано: ${j.depleted} шт.`, 'ok');
+                    load();
+                } catch (e) { closeModal(); toast(e.message, 'err'); }
+            }},
+            { label: 'Нет', cls: 'btn-secondary' }]);
+    };
+
     const bi = document.getElementById('btn-install');
-    if (bi) bi.onclick = () => location.href = `/?mode=select&toner_id=${t.id}`;
+    if (bi) bi.onclick = () => location.href = `/?mode=select&toner_id=${r.stock_toner_id}`;
 
     const br = document.getElementById('btn-return');
     if (br) br.onclick = () => {

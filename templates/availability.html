@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Наличие — Тонер-фарм{% endblock %}
+{% block content %}
+<h1>Наличие тонеров для принтеров</h1>
+<p style="color:var(--muted);font-size:14px">
+    Остатки на складе сгруппированы по моделям принтеров (принтеры с одинаковой
+    моделью объединены). Учитываются все совместимые тонеры, включая аналоги
+    других производителей.
+</p>
+<div id="list"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+    const groups = await api('/api/availability');
+    const box = document.getElementById('list');
+    if (!groups.length) {
+        box.innerHTML = '<div class="card" style="color:var(--muted)">Принтеры пока не добавлены</div>';
+        return;
+    }
+    box.innerHTML = '';
+    groups.forEach(g => {
+        const colors = Object.entries(g.colors).map(([color, n]) =>
+            `<div class="avail-color${n === 0 ? ' avail-zero' : ''}">${colorChip(color)} <b>${n}&nbsp;шт.</b></div>`
+        ).join('');
+        const el = document.createElement('div');
+        el.className = 'card';
+        el.innerHTML = `
+            <h2 style="margin:0 0 4px">${g.model || 'Без модели'}</h2>
+            <p style="color:var(--muted);margin:0 0 12px">${g.printers.join(', ')}</p>
+            <div class="avail-row">${colors}</div>`;
+        box.appendChild(el);
+    });
+}
+load();
+</script>
+{% endblock %}

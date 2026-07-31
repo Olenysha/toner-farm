@@ -145,16 +145,16 @@ th { background: #f3f4f6; }
 
 .printer-icon {
     position: absolute;
-    width: 44px;
-    height: 44px;
-    margin: -22px 0 0 -22px;
-    border-radius: 10px;
+    width: var(--icon-size, 44px);
+    height: var(--icon-size, 44px);
+    margin: calc(var(--icon-size, 44px) / -2) 0 0 calc(var(--icon-size, 44px) / -2);
+    border-radius: calc(var(--icon-size, 44px) * 0.23);
     border: 3px solid #fff;
     box-shadow: 0 2px 6px rgba(0,0,0,.35);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
+    font-size: calc(var(--icon-size, 44px) * 0.45);
     cursor: pointer;
     transition: transform .15s;
 }
@@ -174,12 +174,25 @@ th { background: #f3f4f6; }
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 11px;
+    font-size: var(--label-size, 11px);
     background: rgba(255,255,255,.85);
     border-radius: 4px;
     padding: 1px 5px;
     white-space: nowrap;
 }
+
+/* ---------- Наличие тонеров для принтеров ---------- */
+.avail-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.avail-color {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #f3f4f6;
+    font-size: 15px;
+}
+.avail-zero b { color: var(--err); }
 
 /* ---------- Модалка / тост ---------- */
 .modal-backdrop {

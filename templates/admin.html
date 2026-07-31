@@ -65,6 +65,7 @@
     <label>Совместимые модели принтеров</label>
     <select id="bm-compat" multiple></select>
     <label>Ресурс, стр.</label><input type="number" id="bm-yield" min="0">
+    <label>Количество на склад, шт. (только для нового EAN)</label><input type="number" id="bm-qty" min="1" value="1">
     <div style="margin-top:12px"><button class="btn" id="bm-save">Сохранить</button></div>
 </div>
 
@@ -267,13 +268,16 @@ document.getElementById('bm-save').onclick = async () => {
         compatible_printers: [...document.getElementById('bm-compat').selectedOptions].map(o => o.value),
         page_yield: Number(document.getElementById('bm-yield').value) || null
     };
+    if (!isEdit) data.quantity = Math.max(1, Number(document.getElementById('bm-qty').value) || 1);
     try {
         if (isEdit) await api('/api/barcode_map/' + ean, 'PUT', data);
         else await api('/api/barcode_map', 'POST', data);
         toast('Сохранено', 'ok');
         document.getElementById('bm-ean').disabled = false;
         ['bm-ean', 'bm-model', 'bm-yield'].forEach(i => document.getElementById(i).value = '');
+        document.getElementById('bm-qty').value = 1;
         loadBm();
+        loadStock();
     } catch (e) { toast(e.message, 'err'); }
 };
 
