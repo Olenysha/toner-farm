@@ -143,6 +143,66 @@ th { background: #f3f4f6; }
 }
 .map-canvas img { display: block; width: 100%; user-select: none; -webkit-user-drag: none; pointer-events: none; }
 
+/* ---------- Меню выбора этажа (правый верхний угол карты) ---------- */
+.floor-menu {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+.floor-btn {
+    min-height: 44px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 999px;
+    background: rgba(31, 41, 55, .92);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    touch-action: manipulation;
+}
+.floor-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transform: translateX(24px);
+    transition: max-height .25s ease, opacity .2s ease, transform .25s ease;
+    pointer-events: none;
+}
+.floor-panel.open {
+    max-height: 300px;
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+.floor-panel button {
+    min-height: 48px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .95);
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    white-space: nowrap;
+    touch-action: manipulation;
+}
+.floor-panel button.active {
+    background: var(--accent);
+    color: #fff;
+}
+
 .printer-icon {
     position: absolute;
     width: var(--icon-size, 44px);
@@ -179,6 +239,53 @@ th { background: #f3f4f6; }
     border-radius: 4px;
     padding: 1px 5px;
     white-space: nowrap;
+}
+
+/* ---------- Подсказка при наведении на принтер ---------- */
+.map-tooltip {
+    display: none;
+    position: fixed;
+    z-index: 150;
+    background: rgba(31, 41, 55, .95);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    pointer-events: none;
+    max-width: 260px;
+}
+.map-tooltip .dot { margin-right: 5px; }
+
+/* мини-бары уровня тонера в подсказке */
+.tip-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 12px;
+}
+.tip-bar-label { width: 12px; font-weight: 700; }
+.tip-bar-track {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255,255,255,.25);
+    overflow: hidden;
+}
+.tip-bar-track span { display: block; height: 100%; border-radius: 3px; }
+.tip-bar-pct { width: 36px; text-align: right; }
+
+/* алерты в подсказке */
+.tip-alerts {
+    margin-top: 6px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255,255,255,.25);
+    font-size: 12px;
+    line-height: 1.4;
+    color: #fde68a;
+    max-width: 300px;
 }
 
 /* ---------- Наличие тонеров для принтеров ---------- */
@@ -218,6 +325,17 @@ th { background: #f3f4f6; }
 .modal h3 { margin-top: 0; }
 .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
 .modal-actions .btn { flex: 1; }
+
+/* строка складского тонера в попапе замены */
+.stock-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+.stock-row .btn { flex-shrink: 0; }
 
 #toast {
     position: fixed;

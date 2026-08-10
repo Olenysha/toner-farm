@@ -2,3 +2,5 @@ flask
 qrcode[pil]
 pillow
 openpyxl
+pysnmp>=4.4,<7
+requests

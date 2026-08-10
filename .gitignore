@@ -5,6 +5,7 @@ __pycache__/
 
 # Runtime data (пересоздаются при запуске)
 database.db
+alerts.db
 backups/
 static/qr_codes/*.png
 last_ip.txt

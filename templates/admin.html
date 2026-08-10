@@ -6,7 +6,7 @@
 <div class="card">
     <h2>Принтеры</h2>
     <div class="table-wrap"><table id="printers-table">
-        <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>X/Y</th><th>IP</th><th></th></tr></thead>
+        <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>Этаж</th><th>X/Y</th><th>IP</th><th></th></tr></thead>
         <tbody></tbody>
     </table></div>
     <h2 id="pf-title">Добавить принтер</h2>
@@ -15,6 +15,7 @@
     <label>Модель</label><input type="text" id="pf-model" placeholder="HP Color LaserJet M452">
     <label>Тип</label>
     <select id="pf-type"><option value="mono">Моно (1 слот)</option><option value="color">Цветной (4 слота)</option></select>
+    <label>Этаж</label><select id="pf-floor"></select>
     <label>X, %</label><input type="number" id="pf-x" min="0" max="100" step="0.5" value="50">
     <label>Y, %</label><input type="number" id="pf-y" min="0" max="100" step="0.5" value="50">
     <label>IP-адрес (опц.)</label><input type="text" id="pf-ip">
@@ -26,7 +27,8 @@
 
 <div class="card">
     <h2>Расстановка на карте (перетаскивайте значки)</h2>
-    <div class="minimap" id="minimap">
+    <label>Этаж</label><select id="mm-floor"></select>
+    <div class="minimap" id="minimap" style="margin-top:10px">
         <img id="minimap-img" src="{{ url_for('static', filename='floor_plan.png') }}" alt="">
     </div>
 </div>
@@ -43,7 +45,9 @@
 <div class="card">
     <h2>План этажа</h2>
     <form id="fp-form" enctype="multipart/form-data">
-        <input type="file" name="file" accept="image/*" style="min-height:48px">
+        <label>Этаж</label><select id="fp-floor" name="floor_id"></select>
+        <label>Файл плана (JPEG или PNG)</label>
+        <input type="file" name="file" accept="image/jpeg,image/png" style="min-height:48px">
         <div style="margin-top:12px"><button class="btn" type="submit">Загрузить новый план</button></div>
     </form>
 </div>
@@ -84,6 +88,44 @@
 {% block scripts %}
 <script>
 let printersCache = [];
+let floorsCache = [];
+
+// ---------------- Этажи ----------------
+function floorName(id) {
+    const f = floorsCache.find(x => x.id === id);
+    return f ? f.name : '—';
+}
+
+function fillFloorSelects() {
+    ['pf-floor', 'mm-floor', 'fp-floor'].forEach(sid => {
+        const sel = document.getElementById(sid);
+        const prev = sel.value;
+        sel.innerHTML = '';
+        floorsCache.forEach(f => {
+            const o = document.createElement('option');
+            o.value = f.id; o.textContent = f.name;
+            sel.appendChild(o);
+        });
+        if (prev && floorsCache.some(f => String(f.id) === prev)) sel.value = prev;
+    });
+}
+
+async function loadFloors() {
+    floorsCache = await api('/api/floor_plans');
+    fillFloorSelects();
+    updateMinimapImage();
+}
+
+function updateMinimapImage() {
+    const fid = Number(document.getElementById('mm-floor').value);
+    const f = floorsCache.find(x => x.id === fid) || floorsCache[0];
+    if (f) document.getElementById('minimap-img').src = f.image_url;
+}
+
+document.getElementById('mm-floor').onchange = () => {
+    updateMinimapImage();
+    renderMinimap();
+};
 
 // ---------------- Принтеры ----------------
 async function loadPrinters() {
@@ -94,6 +136,7 @@ async function loadPrinters() {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${p.name}</td><td>${p.model}</td>
             <td>${p.type === 'color' ? 'цветной' : 'моно'}</td>
+            <td>${floorName(p.floor_id)}</td>
             <td>${p.x} / ${p.y}</td><td>${p.ip_address || '—'}</td>
             <td style="white-space:nowrap">
                 <button class="btn btn-sm btn-secondary" data-edit="${p.id}">Изм.</button>
@@ -115,6 +158,7 @@ function editPrinter(id) {
     document.getElementById('pf-name').value = p.name;
     document.getElementById('pf-model').value = p.model;
     document.getElementById('pf-type').value = p.type;
+    if (p.floor_id) document.getElementById('pf-floor').value = p.floor_id;
     document.getElementById('pf-x').value = p.x;
     document.getElementById('pf-y').value = p.y;
     document.getElementById('pf-ip').value = p.ip_address || '';
@@ -132,6 +176,7 @@ document.getElementById('pf-save').onclick = async () => {
         name: document.getElementById('pf-name').value,
         model: document.getElementById('pf-model').value,
         type: document.getElementById('pf-type').value,
+        floor_id: Number(document.getElementById('pf-floor').value) || null,
         x: Number(document.getElementById('pf-x').value),
         y: Number(document.getElementById('pf-y').value),
         ip_address: document.getElementById('pf-ip').value || null
@@ -164,8 +209,9 @@ async function delPrinter(id) {
 // ---------------- Мини-карта с drag-and-drop ----------------
 function renderMinimap() {
     const mm = document.getElementById('minimap');
+    const fid = Number(document.getElementById('mm-floor').value);
     mm.querySelectorAll('.printer-icon').forEach(e => e.remove());
-    printersCache.forEach(p => {
+    printersCache.filter(p => p.floor_id === fid).forEach(p => {
         const el = document.createElement('div');
         el.className = 'printer-icon st-' + p.status_color;
         el.style.left = p.x + '%';
@@ -284,12 +330,14 @@ document.getElementById('bm-save').onclick = async () => {
 // ---------------- План этажа ----------------
 document.getElementById('fp-form').onsubmit = async ev => {
     ev.preventDefault();
-    const fd = new FormData(ev.target);
+    const fd = new FormData(ev.target);  // floor_id берётся из select name="floor_id"
     const r = await fetch('/api/floor_plan', { method: 'POST', body: fd });
     const j = await r.json();
     if (r.ok) {
-        toast('План загружен', 'ok');
-        document.getElementById('minimap-img').src = j.image_path;
+        toast('План загружен: ' + (j.name || ''), 'ok');
+        const f = floorsCache.find(x => x.id === j.id);
+        if (f) f.image_url = j.image_url;
+        updateMinimapImage();
     } else toast(j.error || 'Ошибка загрузки', 'err');
 };
 
@@ -302,11 +350,11 @@ document.getElementById('qr-gen').onclick = async () => {
         `<img src="${j.url}" style="width:180px" alt="QR"><p style="font-family:monospace">${ean}</p>`;
 };
 
-// активный план в мини-карту
-api('/api/floor_plan').then(fp => { if (fp.image_url) document.getElementById('minimap-img').src = fp.image_url; });
-
-loadPrinters();
-loadBm();
-loadStock();
+// этажи → селекты и мини-карта, затем остальное
+loadFloors().then(() => {
+    loadPrinters();
+    loadBm();
+    loadStock();
+});
 </script>
 {% endblock %}

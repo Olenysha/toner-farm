@@ -10,11 +10,16 @@
     <div class="map-canvas" id="map-canvas">
         <img id="floor-img" src="{{ url_for('static', filename='floor_plan.png') }}" alt="План этажа">
     </div>
+    <div class="floor-menu" id="floor-menu">
+        <button class="floor-btn" id="floor-btn" type="button">Этаж ▾</button>
+        <div class="floor-panel" id="floor-panel"></div>
+    </div>
+    <div class="map-tooltip" id="map-tooltip"></div>
 </div>
 <p style="color:var(--muted);font-size:14px">
-    <span class="dot dot-green"></span>всё в порядке
-    <span class="dot dot-yellow" style="margin-left:10px"></span>тонер стареет (&gt;60 дн.)
-    <span class="dot dot-red" style="margin-left:10px"></span>пустой слот
+    <span class="dot dot-green"></span>тонер в норме
+    <span class="dot dot-yellow" style="margin-left:10px"></span>тонер ≤ 20%
+    <span class="dot dot-red" style="margin-left:10px"></span>тонер ≤ 5% / пустой слот
     <span class="dot dot-grey" style="margin-left:10px"></span>нет данных
 </p>
 <div class="card" id="size-panel" style="display:none">
@@ -37,21 +42,75 @@ if (selectMode) {
     document.getElementById('mode-hint').style.display = 'block';
 }
 
-async function load() {
-    // активный план этажа
+// ---------- этажи ----------
+let floors = [];
+let currentFloorId = Number(localStorage.getItem('floorId')) || null;
+
+async function loadFloors() {
+    floors = await api('/api/floor_plans').catch(() => []);
+    if (!floors.length) return;
+    if (!currentFloorId || !floors.some(f => f.id === currentFloorId)) {
+        currentFloorId = floors[0].id;
+    }
+    localStorage.setItem('floorId', currentFloorId);
+    renderFloorMenu();
+}
+
+function renderFloorMenu() {
+    const cur = floors.find(f => f.id === currentFloorId);
+    document.getElementById('floor-btn').textContent = '🏢 ' + (cur ? cur.name : 'Этаж') + ' ▾';
+    const panel = document.getElementById('floor-panel');
+    panel.innerHTML = '';
+    floors.forEach(f => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = f.name;
+        if (f.id === currentFloorId) b.classList.add('active');
+        b.onclick = () => {
+            currentFloorId = f.id;
+            localStorage.setItem('floorId', f.id);
+            renderFloorMenu();
+            toggleFloorPanel(false);
+            loadFloor();
+        };
+        panel.appendChild(b);
+    });
+}
+
+function toggleFloorPanel(force) {
+    const panel = document.getElementById('floor-panel');
+    const open = force !== undefined ? force : !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+}
+
+document.getElementById('floor-btn').onclick = () => toggleFloorPanel();
+// не даём жестам карты (pan/zoom) перехватывать нажатия на меню
+document.getElementById('floor-menu').addEventListener('pointerdown', e => e.stopPropagation());
+
+async function loadFloor() {
     try {
-        const fp = await api('/api/floor_plan');
+        const fp = await api('/api/floor_plan' + (currentFloorId ? '?floor_id=' + currentFloorId : ''));
         if (fp.image_url) document.getElementById('floor-img').src = fp.image_url;
     } catch (e) {}
+    try {
+        // SNMP-уровни для всплывающих подсказок (ключ — id принтера)
+        const all = await api('/api/printers/snmp/all');
+        snmpCache = {};
+        all.forEach(r => snmpCache[r.printer_id] = r);
+    } catch (e) {}
+    const printers = await api('/api/printers' + (currentFloorId ? '?floor_id=' + currentFloorId : ''));
+    renderIcons(printers);
+}
 
-    let printers = await api('/api/printers');
+async function load() {
+    await loadFloors();
 
     if (selectMode && selectTonerId) {
         // совместимость: модель принтера в compatible_printers + нужный слот по цвету
         const lk = await api('/api/lookup_by_id/' + selectTonerId).catch(() => null);
         tonerInfo = lk;
     }
-    renderIcons(printers);
+    await loadFloor();
 }
 
 function isCompatible(p) {
@@ -71,6 +130,11 @@ function renderIcons(printers) {
         el.style.left = p.x + '%';
         el.style.top = p.y + '%';
         el.innerHTML = '🖨<span class="printer-label">' + p.name + '</span>';
+        // подсказка с состоянием при наведении
+        el.addEventListener('mouseenter', ev => showTip(p, ev));
+        el.addEventListener('mousemove', moveTip);
+        el.addEventListener('mouseleave', hideTip);
+        el.addEventListener('pointerdown', hideTip);
         if (selectMode) {
             if (isCompatible(p)) {
                 el.classList.add('compatible');
@@ -85,6 +149,68 @@ function renderIcons(printers) {
     });
 }
 
+// ---------- всплывающая подсказка при наведении ----------
+let snmpCache = {};
+
+function tipMiniBar(label, val, baseColor) {
+    const pct = Math.min(100, Math.max(0, val));
+    const c = pct <= 5 ? '#ef4444' : pct <= 20 ? '#eab308' : baseColor;
+    return `<div class="tip-bar">
+        <span class="tip-bar-label">${label}</span>
+        <span class="tip-bar-track"><span style="width:${pct}%;background:${c}"></span></span>
+        <span class="tip-bar-pct">${pct}%</span>
+    </div>`;
+}
+
+function tipHtml(p) {
+    const ru = { green: 'тонер в норме', yellow: 'тонер ≤ 20%', red: 'тонер ≤ 5% / пустой слот', grey: 'нет данных' };
+    let html = `<b>${p.name}</b><br><span class="dot dot-${p.status_color}"></span>${ru[p.status_color] || ''}`;
+    const s = snmpCache[p.id];
+    if (s) {
+        // мини-бары уровней
+        if (s.black_level !== null && s.black_level !== undefined)
+            html += tipMiniBar('K', s.black_level, '#e5e7eb');
+        if (p.type === 'color') {
+            if (s.cyan_level !== null && s.cyan_level !== undefined)
+                html += tipMiniBar('C', s.cyan_level, '#06b6d4');
+            if (s.magenta_level !== null && s.magenta_level !== undefined)
+                html += tipMiniBar('M', s.magenta_level, '#d946ef');
+            if (s.yellow_level !== null && s.yellow_level !== undefined)
+                html += tipMiniBar('Y', s.yellow_level, '#eab308');
+        }
+        // алерты с расшифровкой
+        if (s.alerts && s.alerts.length) {
+            html += '<div class="tip-alerts">' +
+                s.alerts.map(a => a).join('<br>') + '</div>';
+        }
+    } else if (p.ip_address) {
+        html += '<br><small>SNMP: не отвечает</small>';
+    }
+    return html;
+}
+
+function showTip(p, ev) {
+    const tip = document.getElementById('map-tooltip');
+    tip.innerHTML = tipHtml(p);
+    tip.style.display = 'block';
+    moveTip(ev);
+}
+
+function moveTip(ev) {
+    const tip = document.getElementById('map-tooltip');
+    if (tip.style.display !== 'block') return;
+    const pad = 14;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    x = Math.min(x, window.innerWidth - tip.offsetWidth - 8);
+    y = Math.min(y, window.innerHeight - tip.offsetHeight - 8);
+    tip.style.left = Math.max(8, x) + 'px';
+    tip.style.top = Math.max(8, y) + 'px';
+}
+
+function hideTip() {
+    document.getElementById('map-tooltip').style.display = 'none';
+}
+
 function slotsHtml(p) {
     const rows = [['Чёрный', p.slot_bk], ['Голубой', p.slot_c],
                   ['Пурпурный', p.slot_m], ['Жёлтый', p.slot_y]];
@@ -95,13 +221,130 @@ function slotsHtml(p) {
     }).join('');
 }
 
-function showPrinter(p) {
-    showModal(p.name, `
-        <p>${statusDot(p.status_color)}<br>
-        <b>${p.model}</b> (${p.type === 'color' ? 'цветной' : 'моно'})</p>
-        <table>${slotsHtml(p)}</table>`,
-        [{ label: 'Заменить тонер', cls: 'btn-ok', onClick: () => location.href = '/scan' },
+// «3 минуты назад» / локальное время
+function timeAgo(ts) {
+    const then = new Date(String(ts).replace(' ', 'T'));
+    if (isNaN(then)) return ts;
+    const sec = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
+    if (sec < 60) return 'только что';
+    const min = Math.round(sec / 60);
+    if (min < 60) return min + ' мин. назад';
+    const h = Math.round(min / 60);
+    if (h < 24) return h + ' ч. назад';
+    return then.toLocaleString();
+}
+
+function tonerBar(label, val, baseColor) {
+    const pct = Math.min(100, Math.max(0, val));
+    const color = pct <= 5 ? 'var(--err)' : pct <= 20 ? 'var(--warn)' : baseColor;
+    return `
+        <div style="margin:8px 0">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px">
+                <span>${label}</span><span>${pct}%</span>
+            </div>
+            <div style="background:#e5e7eb;border-radius:4px;height:10px;overflow:hidden">
+                <div style="width:${pct}%;background:${color};height:100%"></div>
+            </div>
+        </div>`;
+}
+
+async function showPrinter(p) {
+    // подтягиваем свежие SNMP-данные (если принтер опрашивается)
+    let snmp = null;
+    try {
+        snmp = await api('/api/printers/' + p.id + '/snmp');
+    } catch (e) { /* нет SNMP-данных — покажем слоты из БД */ }
+
+    let html = `<p>${statusDot(p.status_color)}<br>
+        <b>${p.model}</b> (${p.type === 'color' ? 'цветной' : 'моно'})</p>`;
+
+    if (snmp) {
+        html += `<p style="font-size:12px;color:var(--muted)">Обновлено: ${timeAgo(snmp.timestamp)}</p>`;
+        if (p.type === 'color') {
+            const colors = [
+                ['black_level', 'Чёрный', '#111827'],
+                ['cyan_level', 'Голубой', '#06b6d4'],
+                ['magenta_level', 'Пурпурный', '#d946ef'],
+                ['yellow_level', 'Жёлтый', '#eab308'],
+            ];
+            colors.forEach(([key, label, color]) => {
+                const val = snmp[key];
+                if (val !== null && val !== undefined) html += tonerBar(label, val, color);
+            });
+        } else if (snmp.black_level !== null && snmp.black_level !== undefined) {
+            html += tonerBar('Тонер', snmp.black_level, 'var(--ok)');
+        }
+        if (snmp.page_counter) {
+            html += `<p style="font-size:13px;color:var(--muted);margin-top:8px">
+                Всего отпечатано: ${Number(snmp.page_counter).toLocaleString('ru-RU')} стр.</p>`;
+        }
+        if (snmp.alerts && snmp.alerts.length) {
+            html += `<div style="margin-top:12px;padding:8px 12px;border-radius:8px;background:#fef3c7">
+                <p style="font-size:13px;font-weight:600;margin:0 0 4px">⚠️ Алерты:</p>
+                ${snmp.alerts.map(a => `<p style="font-size:13px;margin:2px 0">• ${a}</p>`).join('')}
+            </div>`;
+        }
+        if (snmp.status_text) {
+            const cls = snmp.status_text === 'Running' ? 'var(--ok)' :
+                        snmp.status_text === 'Warning' ? 'var(--warn)' : 'var(--err)';
+            html += `<p style="font-size:13px;margin-top:8px">SNMP статус: <b style="color:${cls}">${snmp.status_text}</b></p>`;
+        }
+    } else {
+        // нет SNMP — старые слоты из БД
+        html += `<table>${slotsHtml(p)}</table>`;
+        if (p.ip_address) {
+            html += `<p style="font-size:12px;color:var(--muted)">SNMP: принтер не отвечает (${p.ip_address})</p>`;
+        }
+    }
+
+    html += `<p style="margin-top:12px"><a href="/history?printer_id=${p.id}" style="font-size:13px">История операций →</a></p>`;
+
+    showModal(p.name, html,
+        [{ label: 'Заменить тонер', cls: 'btn-ok', keepOpen: true, onClick: () => showTonerChoice(p) },
          { label: 'Закрыть', cls: 'btn-secondary' }]);
+}
+
+// ---------- замена тонера со склада (без сканера) ----------
+async function showTonerChoice(p) {
+    let items = [];
+    try {
+        items = await api('/api/printers/' + p.id + '/available_toners');
+    } catch (e) { /* покажем пустой список */ }
+
+    let html;
+    if (!items.length) {
+        html = `<p>На складе нет совместимых тонеров для <b>${p.model}</b>.</p>`;
+    } else {
+        html = `<p style="font-size:13px;color:var(--muted)">Совместимые тонеры на складе — нажмите «Установить»:</p>` +
+            items.map(t => `
+            <div class="stock-row">
+                <div>${colorChip(t.color)} <b>${t.model_name || t.ean_13}</b><br>
+                <small style="color:var(--muted)">на складе: ${t.stock_count} шт.</small></div>
+                <button class="btn btn-sm btn-ok" data-tid="${t.toner_id}">Установить</button>
+            </div>`).join('');
+    }
+    html += `<p style="margin-top:12px"><a href="/scan" style="font-size:13px">Нет нужного? Сканировать коробку →</a></p>`;
+
+    showModal('Замена тонера — ' + p.name, html,
+        [{ label: 'Назад', cls: 'btn-secondary', keepOpen: true, onClick: () => showPrinter(p) }]);
+
+    document.querySelectorAll('#modal-body [data-tid]').forEach(b => {
+        b.onclick = () => installFromStock(p, +b.dataset.tid, b);
+    });
+}
+
+async function installFromStock(p, tonerId, btn) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+        await api('/api/install', 'POST', { toner_id: tonerId, printer_id: p.id });
+        showModal('Готово ✓', '<p style="font-size:18px">Тонер установлен.</p>', []);
+        setTimeout(() => { closeModal(); loadFloor(); }, 1200);
+    } catch (e) {
+        toast(e.message, 'err');
+        btn.disabled = false;
+        btn.textContent = 'Установить';
+    }
 }
 
 function confirmInstall(p) {
