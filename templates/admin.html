@@ -4,6 +4,21 @@
 <h1>Админ-панель</h1>
 
 <div class="card">
+    <h2>Предприятия и этажи</h2>
+    <div class="table-wrap"><table id="ent-table">
+        <thead><tr><th>Предприятие</th><th>Этажи</th><th></th></tr></thead>
+        <tbody></tbody>
+    </table></div>
+    <h2>Добавить предприятие</h2>
+    <label>Название</label><input type="text" id="ent-name" placeholder="Новое предприятие">
+    <div style="margin-top:12px"><button class="btn" id="ent-add">Добавить</button></div>
+    <h2>Добавить этаж</h2>
+    <label>Предприятие</label><select id="fl-ent"></select>
+    <label>Название этажа</label><input type="text" id="fl-name" placeholder="1 этаж">
+    <div style="margin-top:12px"><button class="btn" id="fl-add">Добавить</button></div>
+</div>
+
+<div class="card">
     <h2>Принтеры</h2>
     <div class="table-wrap"><table id="printers-table">
         <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>Этаж</th><th>X/Y</th><th>IP</th><th></th></tr></thead>
@@ -89,6 +104,90 @@
 <script>
 let printersCache = [];
 let floorsCache = [];
+let entCache = [];
+
+// ---------------- Предприятия и этажи ----------------
+function entName(id) {
+    const e = entCache.find(x => x.id === id);
+    return e ? e.name : '—';
+}
+
+async function loadEnterprises() {
+    entCache = await api('/api/enterprises');
+    const sel = document.getElementById('fl-ent');
+    sel.innerHTML = '';
+    entCache.forEach(e => {
+        const o = document.createElement('option');
+        o.value = e.id; o.textContent = e.name;
+        sel.appendChild(o);
+    });
+    renderEntTable();
+}
+
+function renderEntTable() {
+    const tb = document.querySelector('#ent-table tbody');
+    tb.innerHTML = '';
+    entCache.forEach(e => {
+        const floors = floorsCache.filter(f => f.enterprise_id === e.id);
+        const floorsHtml = floors.length
+            ? floors.map(f =>
+                `<span style="white-space:nowrap">${f.name} <button class="btn btn-sm btn-danger" data-del-floor="${f.id}" title="Удалить этаж">✕</button></span>`
+              ).join(', ')
+            : '<span style="color:var(--muted)">нет этажей</span>';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><b>${e.name}</b></td><td>${floorsHtml}</td>
+            <td><button class="btn btn-sm btn-danger" data-del-ent="${e.id}" title="Удалить предприятие">✕</button></td>`;
+        tb.appendChild(tr);
+    });
+    tb.querySelectorAll('[data-del-ent]').forEach(b => b.onclick = () => delEnterprise(+b.dataset.delEnt));
+    tb.querySelectorAll('[data-del-floor]').forEach(b => b.onclick = () => delFloor(+b.dataset.delFloor));
+}
+
+document.getElementById('ent-add').onclick = async () => {
+    const name = document.getElementById('ent-name').value.trim();
+    if (!name) { toast('Введите название предприятия', 'err'); return; }
+    try {
+        await api('/api/enterprises', 'POST', { name });
+        document.getElementById('ent-name').value = '';
+        toast('Предприятие добавлено', 'ok');
+        await loadEnterprises();
+    } catch (e) { toast(e.message, 'err'); }
+};
+
+document.getElementById('fl-add').onclick = async () => {
+    const name = document.getElementById('fl-name').value.trim();
+    const enterprise_id = Number(document.getElementById('fl-ent').value) || null;
+    if (!name) { toast('Введите название этажа', 'err'); return; }
+    if (!enterprise_id) { toast('Сначала добавьте предприятие', 'err'); return; }
+    try {
+        await api('/api/floor_plans', 'POST', { name, enterprise_id });
+        document.getElementById('fl-name').value = '';
+        toast('Этаж добавлен', 'ok');
+        await loadFloors();
+        renderEntTable();
+    } catch (e) { toast(e.message, 'err'); }
+};
+
+async function delEnterprise(id) {
+    showModal('Удаление', '<p>Удалить предприятие?</p>', [
+        { label: 'Да', cls: 'btn-danger', onClick: async () => {
+            try { await api('/api/enterprises/' + id, 'DELETE'); await loadEnterprises(); }
+            catch (e) { toast(e.message, 'err'); }
+        }},
+        { label: 'Нет', cls: 'btn-secondary' }]);
+}
+
+async function delFloor(id) {
+    showModal('Удаление', '<p>Удалить этаж?</p>', [
+        { label: 'Да', cls: 'btn-danger', onClick: async () => {
+            try {
+                await api('/api/floor_plans/' + id, 'DELETE');
+                await loadFloors();
+                renderEntTable();
+            } catch (e) { toast(e.message, 'err'); }
+        }},
+        { label: 'Нет', cls: 'btn-secondary' }]);
+}
 
 // ---------------- Этажи ----------------
 function floorName(id) {
@@ -97,21 +196,24 @@ function floorName(id) {
 }
 
 function fillFloorSelects() {
+    // в селектах — только этажи текущего предприятия
+    const eid = currentEnterprise();
+    const visible = eid ? floorsCache.filter(f => f.enterprise_id === eid) : floorsCache;
     ['pf-floor', 'mm-floor', 'fp-floor'].forEach(sid => {
         const sel = document.getElementById(sid);
         const prev = sel.value;
         sel.innerHTML = '';
-        floorsCache.forEach(f => {
+        visible.forEach(f => {
             const o = document.createElement('option');
             o.value = f.id; o.textContent = f.name;
             sel.appendChild(o);
         });
-        if (prev && floorsCache.some(f => String(f.id) === prev)) sel.value = prev;
+        if (prev && visible.some(f => String(f.id) === prev)) sel.value = prev;
     });
 }
 
 async function loadFloors() {
-    floorsCache = await api('/api/floor_plans');
+    floorsCache = await api('/api/floor_plans');  // все этажи — для таблицы предприятий
     fillFloorSelects();
     updateMinimapImage();
 }
@@ -129,7 +231,7 @@ document.getElementById('mm-floor').onchange = () => {
 
 // ---------------- Принтеры ----------------
 async function loadPrinters() {
-    printersCache = await api('/api/printers');
+    printersCache = await api(withEnt('/api/printers'));
     const tb = document.querySelector('#printers-table tbody');
     tb.innerHTML = '';
     printersCache.forEach(p => {
@@ -350,11 +452,14 @@ document.getElementById('qr-gen').onclick = async () => {
         `<img src="${j.url}" style="width:180px" alt="QR"><p style="font-family:monospace">${ean}</p>`;
 };
 
-// этажи → селекты и мини-карта, затем остальное
-loadFloors().then(() => {
-    loadPrinters();
-    loadBm();
-    loadStock();
-});
+// предприятия → этажи → селекты и мини-карта, затем остальное
+loadEnterprises()
+    .then(() => loadFloors())
+    .then(() => {
+        renderEntTable();
+        loadPrinters();
+        loadBm();
+        loadStock();
+    });
 </script>
 {% endblock %}

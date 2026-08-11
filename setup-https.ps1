@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
   setup-https.ps1
   Одна кнопка — HTTPS для Тонер-фарм.
@@ -136,10 +136,15 @@ $newBlock = @(
     "    key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')",
     "    if os.path.exists(cert) and os.path.exists(key):",
     "        ssl_ctx = (cert, key)",
+    "        app.config['HTTPS_ENABLED'] = True",
     "        print(f'🔒 HTTPS: https://{local_ip}:5000')",
     "    else:",
     "        ssl_ctx = None",
+    "        app.config['HTTPS_ENABLED'] = False",
     "        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')",
+    "",
+    "    # Фоновый SNMP-опрос принтеров",
+    "    start_snmp_polling()",
     "",
     "    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)"
 )

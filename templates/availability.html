@@ -13,7 +13,7 @@
 {% block scripts %}
 <script>
 async function load() {
-    const groups = await api('/api/availability');
+    const groups = await api(withEnt('/api/availability'));
     const box = document.getElementById('list');
     if (!groups.length) {
         box.innerHTML = '<div class="card" style="color:var(--muted)">Принтеры пока не добавлены</div>';

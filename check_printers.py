@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 Проверка SNMP + Web принтеров Герофарм.
+SNMP-хелперы общие с приложением (snmp_monitor).
 """
-from pysnmp.hlapi import (
-    SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-    ObjectType, ObjectIdentity, getCmd, nextCmd
-)
+from snmp_monitor import snmp_get, snmp_walk
 import requests
 import urllib3
 
@@ -46,49 +44,6 @@ def check_web(ip):
         except Exception:
             pass
     return 'НЕДОСТУПЕН'
-
-
-def snmp_get(ip, oid):
-    """Одиночный OID. Возвращает строку или None."""
-    try:
-        for (errInd, errSts, errIdx, varBinds) in getCmd(
-            SnmpEngine(),
-            CommunityData(COMMUNITY, mpModel=1),
-            UdpTransportTarget((ip, 161), timeout=TIMEOUT, retries=1),
-            ContextData(),
-            ObjectType(ObjectIdentity(oid))
-        ):
-            if errInd or errSts:
-                return None
-            for _, val in varBinds:
-                return str(val)
-    except Exception as e:
-        return f"ERROR: {e}"
-    return None
-
-
-def snmp_walk(ip, base_oid):
-    """Walk по ветке. Возвращает список (oid, value)."""
-    results = []
-    try:
-        for (errInd, errSts, errIdx, varBinds) in nextCmd(
-            SnmpEngine(),
-            CommunityData(COMMUNITY, mpModel=1),
-            UdpTransportTarget((ip, 161), timeout=TIMEOUT, retries=1),
-            ContextData(),
-            ObjectType(ObjectIdentity(base_oid)),
-            lexicographicMode=False
-        ):
-            if errInd or errSts:
-                break
-            for oid, val in varBinds:
-                oid_str = str(oid)
-                if not oid_str.startswith(base_oid):
-                    return results
-                results.append((oid_str, str(val)))
-    except Exception:
-        pass
-    return results
 
 
 def check_printer(ip, name):

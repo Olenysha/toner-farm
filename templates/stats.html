@@ -28,7 +28,7 @@
 <script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
 <script>
 async function load() {
-    const s = await api('/api/stats');
+    const s = await api(withEnt('/api/stats'));
 
     new Chart(document.getElementById('ch-months'), {
         type: 'bar',

@@ -108,11 +108,12 @@ async function showNewForm(ean) {
     document.getElementById('scanner-view').style.display = 'none';
     const form = document.getElementById('new-form');
     form.style.display = 'block';
+    window.scrollTo(0, 0);  // на Android страница могла быть прокручена вниз
     document.getElementById('new-ean').textContent = ean;
     // список моделей принтеров для мультиселекта
     const sel = document.getElementById('nf-compat');
     sel.innerHTML = '';
-    const printers = await api('/api/printers');
+    const printers = await api(withEnt('/api/printers'));
     [...new Set(printers.map(p => p.model))].forEach(m => {
         const o = document.createElement('option');
         o.value = m; o.textContent = m;

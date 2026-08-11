@@ -1,0 +1,13 @@
+services:
+  toner-farm:
+    build: .
+    container_name: toner-farm
+    ports:
+      - "5000:5000"
+    volumes:
+      # БД и бэкапы — в ./data рядом с проектом (сюда же скопировать
+      # существующие database.db / alerts.db при переезде)
+      - ./data:/app/data
+      # загруженные планы этажей и QR-стикеры сохраняются на хосте
+      - ./static:/app/static
+    restart: unless-stopped

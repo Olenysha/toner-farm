@@ -1,0 +1,19 @@
+.git
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# данные и секреты в образ не входят
+data/
+backups/
+database.db
+alerts.db
+last_ip.txt
+*.pem
+mkcert.exe
+
+# Windows-обвязка в контейнере не нужна
+*.bat
+setup-https.ps1
+Принтеры (1).xlsx

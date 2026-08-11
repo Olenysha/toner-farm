@@ -15,6 +15,7 @@
     <a href="/stats" class="{{ 'active' if request.path == '/stats' }}">Статистика</a>
     <a href="/availability" class="{{ 'active' if request.path == '/availability' }}">Наличие</a>
     <a href="/admin" class="{{ 'active' if request.path == '/admin' }}">Админ</a>
+    <select id="ent-select" class="ent-select" title="Предприятие" style="display:none"></select>
 </nav>
 <main>
     {% block content %}{% endblock %}
@@ -30,10 +31,12 @@
 <div id="toast"></div>
 
 <script>
-// Редирект HTTP → HTTPS (кроме localhost)
+// Редирект HTTP → HTTPS — только если сервер реально запущен с сертификатом
+{% if config.get('HTTPS_ENABLED') %}
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
     location.replace('https://' + location.host + location.pathname + location.search);
 }
+{% endif %}
 
 // ---------- Общие хелперы: модалка, тост ----------
 function showModal(title, bodyHtml, buttons) {
@@ -78,6 +81,38 @@ async function api(url, method, data) {
     if (!r.ok) throw new Error(j.error || ('Ошибка ' + r.status));
     return j;
 }
+
+// ---------- Текущее предприятие (общий контекст всех страниц) ----------
+function currentEnterprise() {
+    return Number(localStorage.getItem('enterpriseId')) || null;
+}
+// добавляет ?enterprise_id= к URL API, если предприятие выбрано
+function withEnt(url) {
+    const e = currentEnterprise();
+    if (!e) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'enterprise_id=' + e;
+}
+
+(async function () {
+    const sel = document.getElementById('ent-select');
+    try {
+        const list = await api('/api/enterprises');
+        if (list.length <= 1) return;  // одно предприятие — переключатель не нужен
+        list.forEach(e => {
+            const o = document.createElement('option');
+            o.value = e.id; o.textContent = e.name;
+            sel.appendChild(o);
+        });
+        const cur = currentEnterprise();
+        sel.value = (cur && list.some(e => e.id === cur)) ? cur : list[0].id;
+        localStorage.setItem('enterpriseId', sel.value);
+        sel.onchange = () => {
+            localStorage.setItem('enterpriseId', sel.value);
+            location.reload();
+        };
+        sel.style.display = '';
+    } catch (e) { /* список недоступен — прячем переключатель */ }
+})();
 
 function colorChip(color) {
     const map = { Black: ['chip-black', 'Чёрный'], Cyan: ['chip-cyan', 'Голубой'],

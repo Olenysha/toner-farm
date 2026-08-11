@@ -7,6 +7,7 @@ __pycache__/
 database.db
 alerts.db
 backups/
+data/
 static/qr_codes/*.png
 last_ip.txt
 

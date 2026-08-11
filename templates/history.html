@@ -36,6 +36,7 @@ function filterQuery() {
     if (document.getElementById('f-to').value) q.set('date_to', document.getElementById('f-to').value);
     if (document.getElementById('f-printer').value) q.set('printer_id', document.getElementById('f-printer').value);
     if (document.getElementById('f-type').value) q.set('type', document.getElementById('f-type').value);
+    if (currentEnterprise()) q.set('enterprise_id', currentEnterprise());
     return q.toString();
 }
 
@@ -54,7 +55,7 @@ async function load() {
     if (!rows.length) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Нет записей</td></tr>';
 }
 
-api('/api/printers').then(ps => {
+api(withEnt('/api/printers')).then(ps => {
     const sel = document.getElementById('f-printer');
     ps.forEach(p => {
         const o = document.createElement('option');

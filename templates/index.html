@@ -10,6 +10,10 @@
     <div class="map-canvas" id="map-canvas">
         <img id="floor-img" src="{{ url_for('static', filename='floor_plan.png') }}" alt="План этажа">
     </div>
+    <div class="floor-menu floor-menu-left" id="ent-menu">
+        <button class="floor-btn" id="ent-btn" type="button">Предприятие ▾</button>
+        <div class="floor-panel floor-panel-left" id="ent-panel"></div>
+    </div>
     <div class="floor-menu" id="floor-menu">
         <button class="floor-btn" id="floor-btn" type="button">Этаж ▾</button>
         <div class="floor-panel" id="floor-panel"></div>
@@ -21,6 +25,7 @@
     <span class="dot dot-yellow" style="margin-left:10px"></span>тонер ≤ 20%
     <span class="dot dot-red" style="margin-left:10px"></span>тонер ≤ 5% / пустой слот
     <span class="dot dot-grey" style="margin-left:10px"></span>нет данных
+    <span id="snmp-stamp" style="margin-left:10px"></span>
 </p>
 <div class="card" id="size-panel" style="display:none">
     <label for="icon-size">Размер иконок: <span id="icon-size-val"></span>px</label>
@@ -42,13 +47,56 @@ if (selectMode) {
     document.getElementById('mode-hint').style.display = 'block';
 }
 
-// ---------- этажи ----------
+// ---------- предприятия и этажи ----------
+let enterprises = [];
 let floors = [];
+let currentEntId = Number(localStorage.getItem('enterpriseId')) || null;
 let currentFloorId = Number(localStorage.getItem('floorId')) || null;
 
+async function loadEnterprises() {
+    enterprises = await api('/api/enterprises').catch(() => []);
+    if (!enterprises.length) return;
+    if (!currentEntId || !enterprises.some(e => e.id === currentEntId)) {
+        currentEntId = enterprises[0].id;
+    }
+    localStorage.setItem('enterpriseId', currentEntId);
+    renderEntMenu();
+}
+
+function renderEntMenu() {
+    const cur = enterprises.find(e => e.id === currentEntId);
+    document.getElementById('ent-btn').textContent = '🏭 ' + (cur ? cur.name : 'Предприятие') + ' ▾';
+    // синхронизируем глобальный селектор в шапке
+    const navSel = document.getElementById('ent-select');
+    if (navSel && currentEntId) navSel.value = currentEntId;
+    const panel = document.getElementById('ent-panel');
+    panel.innerHTML = '';
+    enterprises.forEach(e => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = e.name;
+        if (e.id === currentEntId) b.classList.add('active');
+        b.onclick = async () => {
+            currentEntId = e.id;
+            localStorage.setItem('enterpriseId', e.id);
+            currentFloorId = null;  // у нового предприятия свои этажи
+            renderEntMenu();
+            togglePanel('ent-panel', false);
+            await loadFloors();
+            loadFloor();
+        };
+        panel.appendChild(b);
+    });
+}
+
 async function loadFloors() {
-    floors = await api('/api/floor_plans').catch(() => []);
-    if (!floors.length) return;
+    floors = await api('/api/floor_plans' + (currentEntId ? '?enterprise_id=' + currentEntId : '')).catch(() => []);
+    if (!floors.length) {
+        currentFloorId = null;
+        renderFloorMenu();
+        renderIcons([]);
+        return;
+    }
     if (!currentFloorId || !floors.some(f => f.id === currentFloorId)) {
         currentFloorId = floors[0].id;
     }
@@ -70,26 +118,36 @@ function renderFloorMenu() {
             currentFloorId = f.id;
             localStorage.setItem('floorId', f.id);
             renderFloorMenu();
-            toggleFloorPanel(false);
+            togglePanel('floor-panel', false);
             loadFloor();
         };
         panel.appendChild(b);
     });
 }
 
-function toggleFloorPanel(force) {
-    const panel = document.getElementById('floor-panel');
+function togglePanel(id, force) {
+    const panel = document.getElementById(id);
     const open = force !== undefined ? force : !panel.classList.contains('open');
     panel.classList.toggle('open', open);
+    if (open && id === 'ent-panel') togglePanel('floor-panel', false);
+    if (open && id === 'floor-panel') togglePanel('ent-panel', false);
 }
 
-document.getElementById('floor-btn').onclick = () => toggleFloorPanel();
+document.getElementById('ent-btn').onclick = () => togglePanel('ent-panel');
+document.getElementById('floor-btn').onclick = () => togglePanel('floor-panel');
 // не даём жестам карты (pan/zoom) перехватывать нажатия на меню
+document.getElementById('ent-menu').addEventListener('pointerdown', e => e.stopPropagation());
 document.getElementById('floor-menu').addEventListener('pointerdown', e => e.stopPropagation());
 
 async function loadFloor() {
+    if (!currentFloorId) {
+        // у предприятия пока нет этажей — чистая заглушка
+        document.getElementById('floor-img').src = "{{ url_for('static', filename='floor_plan.png') }}";
+        renderIcons([]);
+        return;
+    }
     try {
-        const fp = await api('/api/floor_plan' + (currentFloorId ? '?floor_id=' + currentFloorId : ''));
+        const fp = await api('/api/floor_plan?floor_id=' + currentFloorId);
         if (fp.image_url) document.getElementById('floor-img').src = fp.image_url;
     } catch (e) {}
     try {
@@ -97,12 +155,25 @@ async function loadFloor() {
         const all = await api('/api/printers/snmp/all');
         snmpCache = {};
         all.forEach(r => snmpCache[r.printer_id] = r);
+        updateSnmpStamp(all);
     } catch (e) {}
-    const printers = await api('/api/printers' + (currentFloorId ? '?floor_id=' + currentFloorId : ''));
+    const printers = await api('/api/printers?floor_id=' + currentFloorId);
     renderIcons(printers);
 }
 
+// ---------- когда последний раз опрашивались принтеры (SNMP) ----------
+function updateSnmpStamp(all) {
+    const el = document.getElementById('snmp-stamp');
+    if (!all || !all.length) {
+        el.textContent = 'SNMP-опрос: данных пока нет';
+        return;
+    }
+    const latest = all.map(r => r.timestamp).sort().slice(-1)[0];
+    el.textContent = 'SNMP-опрос: ' + timeAgo(latest);
+}
+
 async function load() {
+    await loadEnterprises();
     await loadFloors();
 
     if (selectMode && selectTonerId) {
@@ -183,6 +254,8 @@ function tipHtml(p) {
             html += '<div class="tip-alerts">' +
                 s.alerts.map(a => a).join('<br>') + '</div>';
         }
+        // как давно принтер был опрошен по SNMP
+        html += `<br><small>Опрошен: ${timeAgo(s.timestamp)}</small>`;
     } else if (p.ip_address) {
         html += '<br><small>SNMP: не отвечает</small>';
     }
