@@ -129,7 +129,8 @@ async function showNewForm(ean) {
                 color: document.getElementById('nf-color').value,
                 compatible_printers: compat,
                 page_yield: Number(document.getElementById('nf-yield').value) || null,
-                quantity: Math.max(1, Number(document.getElementById('nf-qty').value) || 1)
+                quantity: Math.max(1, Number(document.getElementById('nf-qty').value) || 1),
+                enterprise_id: currentEnterprise()
             });
             toast('Сохранено', 'ok');
             location.href = '/item/' + encodeURIComponent(ean);

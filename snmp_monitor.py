@@ -17,7 +17,7 @@ from pysnmp.hlapi.asyncio import (SnmpEngine, CommunityData,
                                   ObjectType, ObjectIdentity,
                                   get_cmd, next_cmd)
 
-from db import DATABASE, ALERT_DATABASE
+from db import DATABASE, ALERT_DATABASE, now_str
 
 COMMUNITY = 'public'
 SNMP_TIMEOUT = 3          # секунд на один SNMP-запрос
@@ -238,10 +238,10 @@ async def _poll_printer(db, pid, ip, model, name):
 
     db.execute(
         '''INSERT INTO snmp_readings
-           (printer_id, black_level, cyan_level, magenta_level, yellow_level,
+           (printer_id, timestamp, black_level, cyan_level, magenta_level, yellow_level,
             page_counter, status_text, alerts, raw_data)
-           VALUES (?,?,?,?,?,?,?,?,?)''',
-        (pid, black_level, cyan_level, magenta_level, yellow_level,
+           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+        (pid, now_str(), black_level, cyan_level, magenta_level, yellow_level,
          page_counter, status_text, json.dumps(alerts, ensure_ascii=False),
          json.dumps({'sys_name': sys_name, 'sys_descr': sys_descr},
                     ensure_ascii=False)))

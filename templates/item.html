@@ -49,7 +49,7 @@ async function load() {
 
     document.getElementById('btn-add').onclick = async () => {
         try {
-            const j = await api('/api/stock/add', 'POST', { ean_13: ean, quantity: qty() });
+            const j = await api('/api/stock/add', 'POST', { ean_13: ean, quantity: qty(), enterprise_id: currentEnterprise() });
             toast(`Добавлено: ${j.added} шт.`, 'ok');
             load();
         } catch (e) { toast(e.message, 'err'); }
@@ -60,7 +60,7 @@ async function load() {
         showModal('Списание', `<p style="font-size:18px">Списать со склада ${n} шт.?</p>`, [
             { label: 'Да', cls: 'btn-danger', keepOpen: true, onClick: async () => {
                 try {
-                    const j = await api('/api/stock/deplete', 'POST', { ean_13: ean, quantity: n });
+                    const j = await api('/api/stock/deplete', 'POST', { ean_13: ean, quantity: n, enterprise_id: currentEnterprise() });
                     closeModal();
                     toast(`Списано: ${j.depleted} шт.`, 'ok');
                     load();

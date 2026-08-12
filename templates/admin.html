@@ -347,7 +347,7 @@ function renderMinimap() {
 
 // ---------------- Остатки на складе ----------------
 async function loadStock() {
-    const rows = await api('/api/stock');
+    const rows = await api(withEnt('/api/stock'));
     const tb = document.querySelector('#stock-table tbody');
     tb.innerHTML = '';
     rows.forEach(r => {
@@ -359,7 +359,7 @@ async function loadStock() {
 }
 
 document.getElementById('stock-export').onclick = () => {
-    location.href = '/stock/export';
+    location.href = withEnt('/stock/export');
 };
 
 // ---------------- barcode_map ----------------
@@ -414,7 +414,8 @@ document.getElementById('bm-save').onclick = async () => {
         model_name: document.getElementById('bm-model').value,
         color: document.getElementById('bm-color').value,
         compatible_printers: [...document.getElementById('bm-compat').selectedOptions].map(o => o.value),
-        page_yield: Number(document.getElementById('bm-yield').value) || null
+        page_yield: Number(document.getElementById('bm-yield').value) || null,
+        enterprise_id: currentEnterprise()  // barcode_map общий, но приход идёт на склад текущего предприятия
     };
     if (!isEdit) data.quantity = Math.max(1, Number(document.getElementById('bm-qty').value) || 1);
     try {

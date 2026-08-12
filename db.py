@@ -24,6 +24,15 @@ FLOOR_PLAN_PATH = os.path.join(STATIC_DIR, 'floor_plan.png')
 # Сколько дней тонер считается «стареющим» (жёлтый статус на карте)
 AGING_DAYS = 60
 
+
+def now_str():
+    """Текущее локальное время компьютера как 'YYYY-MM-DD HH:MM:SS'.
+
+    Все таймстемпы пишем локальным временем машины (а не UTC,
+    как SQLite CURRENT_TIMESTAMP) — корректно в любой таймзоне.
+    """
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS barcode_map (
     ean_13 TEXT PRIMARY KEY,
@@ -38,7 +47,8 @@ CREATE TABLE IF NOT EXISTS toners (
     status TEXT DEFAULT 'stock',       -- stock / installed / depleted
     current_printer_id INTEGER,
     installed_at TIMESTAMP,
-    quantity INTEGER DEFAULT 1
+    quantity INTEGER DEFAULT 1,
+    enterprise_id INTEGER              -- склад какого предприятия (barcode_map при этом общий)
 );
 CREATE TABLE IF NOT EXISTS printers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +71,7 @@ CREATE TABLE IF NOT EXISTS operations (
     printer_id INTEGER,
     type TEXT,                          -- install / return / auto_depleted / stock_add / depleted
     old_toner_id INTEGER,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    timestamp TIMESTAMP DEFAULT (datetime('now','localtime')),  -- локальное время машины
     user_name TEXT
 );
 CREATE TABLE IF NOT EXISTS enterprises (
@@ -77,7 +87,7 @@ CREATE TABLE IF NOT EXISTS floor_plans (
 CREATE TABLE IF NOT EXISTS snmp_readings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     printer_id INTEGER NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    timestamp TIMESTAMP DEFAULT (datetime('now','localtime')),  -- локальное время машины
     black_level INTEGER,
     cyan_level INTEGER,
     magenta_level INTEGER,
@@ -178,11 +188,34 @@ def migrate_enterprises(db):
         cur = db.execute("INSERT INTO enterprises (name) VALUES ('Герофарм')")
         ent_id = cur.lastrowid
     db.execute('UPDATE floor_plans SET enterprise_id=? WHERE enterprise_id IS NULL', (ent_id,))
+    # склады: toners.enterprise_id (существующие тонеры → первое предприятие)
+    tcols = [r[1] for r in db.execute('PRAGMA table_info(toners)')]
+    if 'enterprise_id' not in tcols:
+        db.execute('ALTER TABLE toners ADD COLUMN enterprise_id INTEGER')
+    db.execute('UPDATE toners SET enterprise_id=? WHERE enterprise_id IS NULL', (ent_id,))
+    migrate_timestamps_local(db)
+
+
+def migrate_timestamps_local(db):
+    """Разово переводим старые UTC-таймстемпы в локальное время.
+
+    Раньше operations/snmp_readings писались через DEFAULT CURRENT_TIMESTAMP
+    (UTC). Модификатор SQLite 'localtime' конвертирует UTC → локальное время
+    этой машины, поэтому сработает правильно в любой таймзоне.
+    Однократность — через PRAGMA user_version (0 → 1).
+    toners.installed_at не трогаем: он всегда писался локальным временем.
+    """
+    if db.execute('PRAGMA user_version').fetchone()[0] != 0:
+        return
+    db.execute("UPDATE operations SET timestamp = datetime(timestamp, 'localtime')")
+    db.execute("UPDATE snmp_readings SET timestamp = datetime(timestamp, 'localtime')")
+    db.execute('PRAGMA user_version = 1')
 
 
 def seed_db(db):
     """Демо-данные для пилота: реальные принтеры Герофарм."""
     floor_id = db.execute('SELECT MIN(id) FROM floor_plans').fetchone()[0]
+    ent_id = db.execute('SELECT MIN(id) FROM enterprises').fetchone()[0]
     db.executemany(
         'INSERT INTO printers (name, model, type, slots_count, x, y, floor_id, ip_address) VALUES (?,?,?,?,?,?,?,?)',
         [
@@ -211,8 +244,8 @@ def seed_db(db):
              json.dumps(['HP Color LaserJet M452']), 2300),
         ])
     db.executemany(
-        "INSERT INTO toners (ean_13, status) VALUES (?, 'stock')",
-        [('0886111244457',), ('0886111244457',), ('0886111244464',)])
+        "INSERT INTO toners (ean_13, status, enterprise_id) VALUES (?, 'stock', ?)",
+        [('0886111244457', ent_id), ('0886111244457', ent_id), ('0886111244464', ent_id)])
 
 
 # ------------------------------------------------------------------ alerts.db

@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw
 
 from db import (BASE_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH, SLOT_COLUMN,
                 get_db, close_db, init_db, maybe_backup, row_to_dict,
-                get_barcode, toner_with_info, serialize_printer)
+                get_barcode, toner_with_info, serialize_printer, now_str)
 from snmp_monitor import start_snmp_polling
 
 # v2: авторизация / AD-интеграция — сейчас пилот без логина, операции пишутся без подписи пользователя
@@ -177,18 +177,30 @@ def api_barcode_map_create():
         'INSERT OR REPLACE INTO barcode_map (ean_13, model_name, color, compatible_printers, page_yield) VALUES (?,?,?,?,?)',
         (ean, data.get('model_name'), data.get('color'),
          json.dumps(compat, ensure_ascii=False), data.get('page_yield')))
-    _add_stock(db, ean, qty)
+    _add_stock(db, ean, qty, data.get('enterprise_id'))
     db.commit()
     return jsonify({'ok': True, 'barcode': get_barcode(db, ean)})
 
 
-def _add_stock(db, ean, qty):
-    """Приход qty штук на склад + запись в operations."""
+def _add_stock(db, ean, qty, enterprise_id=None):
+    """Приход qty штук на склад предприятия + запись в operations.
+
+    enterprise_id не передан/не найден → склад первого предприятия.
+    """
+    eid = None
+    if enterprise_id:
+        row = db.execute('SELECT id FROM enterprises WHERE id = ?',
+                         (enterprise_id,)).fetchone()
+        eid = row['id'] if row else None
+    if not eid:
+        eid = db.execute('SELECT MIN(id) FROM enterprises').fetchone()[0]
     for _ in range(qty):
-        cur = db.execute("INSERT INTO toners (ean_13, status) VALUES (?, 'stock')", (ean,))
+        cur = db.execute(
+            "INSERT INTO toners (ean_13, status, enterprise_id) VALUES (?, 'stock', ?)",
+            (ean, eid))
         db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
-            (cur.lastrowid, None, 'stock_add', None))
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
+            (cur.lastrowid, None, 'stock_add', None, now_str()))
 
 
 @app.route('/api/stock/add', methods=['POST'])
@@ -202,30 +214,37 @@ def api_stock_add():
     db = get_db()
     if not get_barcode(db, ean):
         return jsonify({'error': 'EAN не найден в справочнике'}), 404
-    _add_stock(db, ean, qty)
+    _add_stock(db, ean, qty, data.get('enterprise_id'))
     db.commit()
     return jsonify({'ok': True, 'added': qty})
 
 
 @app.route('/api/stock/deplete', methods=['POST'])
 def api_stock_deplete():
-    """Ручное списание qty штук со склада по EAN (списываются самые старые)."""
+    """Ручное списание qty штук со склада по EAN (списываются самые старые).
+
+    С enterprise_id — списание только со склада этого предприятия.
+    """
     data = request.get_json(force=True)
     ean = (data.get('ean_13') or '').strip()
     qty = int(data.get('quantity') or 0)
     if qty < 1:
         return jsonify({'error': 'Количество должно быть ≥ 1'}), 400
     db = get_db()
-    rows = db.execute(
-        "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock' ORDER BY id",
-        (ean,)).fetchall()
+    sql = "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock'"
+    params = [ean]
+    if data.get('enterprise_id'):
+        sql += ' AND enterprise_id = ?'
+        params.append(data['enterprise_id'])
+    sql += ' ORDER BY id'
+    rows = db.execute(sql, params).fetchall()
     if len(rows) < qty:
         return jsonify({'error': f'На складе только {len(rows)} шт.'}), 400
     for r in rows[:qty]:
         db.execute("UPDATE toners SET status='depleted' WHERE id=?", (r['id'],))
         db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
-            (r['id'], None, 'depleted', None))
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
+            (r['id'], None, 'depleted', None, now_str()))
     db.commit()
     return jsonify({'ok': True, 'depleted': qty})
 
@@ -251,21 +270,21 @@ def api_install():
         return jsonify({'error': 'В моно-принтер можно ставить только чёрный тонер'}), 400
 
     old_toner_id = printer[col]
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = now_str()
     if old_toner_id:
         # старый тонер из этого слота → списан
         db.execute("UPDATE toners SET status='depleted', current_printer_id=NULL WHERE id=?",
                    (old_toner_id,))
         db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
-            (old_toner_id, printer_id, 'auto_depleted', None))
+            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
+            (old_toner_id, printer_id, 'auto_depleted', None, now))
     db.execute(
         "UPDATE toners SET status='installed', current_printer_id=?, installed_at=? WHERE id=?",
         (printer_id, now, toner_id))
     db.execute(f'UPDATE printers SET {col}=? WHERE id=?', (toner_id, printer_id))
     db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
-        (toner_id, printer_id, 'install', old_toner_id))
+        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
+        (toner_id, printer_id, 'install', old_toner_id, now))
     db.commit()
     p = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
     return jsonify({'ok': True, 'auto_depleted_id': old_toner_id,
@@ -292,8 +311,8 @@ def api_return():
         "UPDATE toners SET status='stock', current_printer_id=NULL, installed_at=NULL WHERE id=?",
         (toner_id,))
     db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id) VALUES (?,?,?,?)",
-        (toner_id, printer_id, 'return', None))
+        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
+        (toner_id, printer_id, 'return', None, now_str()))
     db.commit()
     return jsonify({'ok': True})
 
@@ -379,6 +398,11 @@ def api_printer_available_toners(pid):
     p = db.execute('SELECT * FROM printers WHERE id = ?', (pid,)).fetchone()
     if not p:
         return jsonify({'error': 'Принтер не найден'}), 404
+    # предприятие принтера (через этаж) — показываем только его склад
+    prow = db.execute(
+        'SELECT fp.enterprise_id AS eid FROM printers pr '
+        'JOIN floor_plans fp ON fp.id = pr.floor_id WHERE pr.id = ?', (pid,)).fetchone()
+    ent_id = prow['eid'] if prow else None
     out = []
     for r in db.execute('SELECT ean_13 FROM barcode_map'):
         bc = get_barcode(db, r['ean_13'])
@@ -386,9 +410,13 @@ def api_printer_available_toners(pid):
             continue
         if p['type'] == 'mono' and bc['color'] != 'Black':
             continue
-        stock = db.execute(
-            "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock' ORDER BY id",
-            (bc['ean_13'],)).fetchall()
+        sql = "SELECT id FROM toners WHERE ean_13 = ? AND status = 'stock'"
+        params = [bc['ean_13']]
+        if ent_id:
+            sql += ' AND enterprise_id = ?'
+            params.append(ent_id)
+        sql += ' ORDER BY id'
+        stock = db.execute(sql, params).fetchall()
         if not stock:
             continue
         out.append({'toner_id': stock[-1]['id'], 'ean_13': bc['ean_13'],
@@ -765,11 +793,16 @@ def api_availability():
     других производителей), у которых модель принтера есть в compatible_printers.
     """
     db = get_db()
-    stock_by_ean = {r['ean_13']: r['c'] for r in db.execute(
-        "SELECT ean_13, COUNT(*) AS c FROM toners WHERE status='stock' GROUP BY ean_13")}
+    eid = request.args.get('enterprise_id', type=int)
+    stock_sql = "SELECT ean_13, COUNT(*) AS c FROM toners WHERE status='stock'"
+    stock_params = []
+    if eid:
+        stock_sql += ' AND enterprise_id = ?'
+        stock_params.append(eid)
+    stock_sql += ' GROUP BY ean_13'
+    stock_by_ean = {r['ean_13']: r['c'] for r in db.execute(stock_sql, stock_params)}
     bcs = [get_barcode(db, r['ean_13'])
            for r in db.execute('SELECT ean_13 FROM barcode_map')]
-    eid = request.args.get('enterprise_id', type=int)
     if eid:
         printers = db.execute(
             'SELECT p.* FROM printers p JOIN floor_plans fp ON fp.id = p.floor_id '
@@ -795,23 +828,32 @@ def api_availability():
     return jsonify(sorted(groups.values(), key=lambda g: g['model'] or ''))
 
 
+def _stock_rows(db, enterprise_id=None):
+    """Остатки по моделям/цветам; с enterprise_id — только склад этого предприятия."""
+    sql = ("SELECT bm.model_name, bm.color, COUNT(*) AS c FROM toners t "
+           "JOIN barcode_map bm ON bm.ean_13 = t.ean_13 "
+           "WHERE t.status='stock'")
+    params = []
+    if enterprise_id:
+        sql += ' AND t.enterprise_id = ?'
+        params.append(enterprise_id)
+    sql += ' GROUP BY bm.model_name, bm.color ORDER BY bm.model_name'
+    return db.execute(sql, params).fetchall()
+
+
 @app.route('/api/stock')
 def api_stock():
     db = get_db()
-    rows = db.execute(
-        "SELECT bm.model_name, bm.color, COUNT(*) AS c FROM toners t "
-        "JOIN barcode_map bm ON bm.ean_13 = t.ean_13 "
-        "WHERE t.status='stock' GROUP BY bm.model_name, bm.color ORDER BY bm.model_name").fetchall()
+    eid = request.args.get('enterprise_id', type=int)
+    rows = _stock_rows(db, eid)
     return jsonify([{'model': r['model_name'], 'color': r['color'], 'count': r['c']} for r in rows])
 
 
 @app.route('/stock/export')
 def stock_export():
     db = get_db()
-    rows = db.execute(
-        "SELECT bm.model_name, bm.color, COUNT(*) AS c FROM toners t "
-        "JOIN barcode_map bm ON bm.ean_13 = t.ean_13 "
-        "WHERE t.status='stock' GROUP BY bm.model_name, bm.color ORDER BY bm.model_name").fetchall()
+    eid = request.args.get('enterprise_id', type=int)
+    rows = _stock_rows(db, eid)
     wb = Workbook()
     ws = wb.active
     ws.title = 'Остатки на складе'
