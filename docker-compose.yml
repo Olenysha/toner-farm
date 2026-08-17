@@ -4,10 +4,18 @@ services:
     container_name: toner-farm
     ports:
       - "5000:5000"
+    environment:
+      # HTTPS внутри контейнера: пара из ./certs (кладёт туда setup-https.bat)
+      - CERT_FILE=/app/certs/cert.pem
+      - KEY_FILE=/app/certs/key.pem
     volumes:
-      # БД и бэкапы — в ./data рядом с проектом (сюда же скопировать
-      # существующие database.db / alerts.db при переезде)
-      - ./data:/app/data
+      # единые базы с хоста — те же файлы, что использует start.bat,
+      # никаких отдельных копий в ./data
+      - ./database.db:/app/data/database.db
+      - ./alerts.db:/app/data/alerts.db
+      - ./backups:/app/data/backups
       # загруженные планы этажей и QR-стикеры сохраняются на хосте
       - ./static:/app/static
+      # HTTPS-сертификат (setup-https.bat обновляет certs/ при смене IP)
+      - ./certs:/app/certs:ro
     restart: unless-stopped

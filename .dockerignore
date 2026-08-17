@@ -12,6 +12,7 @@ alerts.db
 last_ip.txt
 *.pem
 mkcert.exe
+certs/
 
 # Windows-обвязка в контейнере не нужна
 *.bat

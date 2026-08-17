@@ -173,7 +173,16 @@ async def _poll_printer(db, pid, ip, model, name):
     sys_status = await _snmp_get(ip, '1.3.6.1.2.1.25.3.2.1.5.1')
 
     if sys_name is None and sys_descr is None:
-        # принтер не отвечает (SNMP выключен / недоступен) — остаётся серым
+        # принтер не отвечает — пишем пустую запись-маркер неудачи;
+        # после SNMP_FAIL_GREY подряд таких записей статус на карте
+        # становится серым (см. db.printer_status)
+        db.execute(
+            '''INSERT INTO snmp_readings
+               (printer_id, timestamp, black_level, cyan_level, magenta_level,
+                yellow_level, page_counter, status_text, alerts, raw_data)
+               VALUES (?,?,?,?,?,?,?,?,?,?)''',
+            (pid, now_str(), None, None, None, None, None, None, '[]', '{}'))
+        db.commit()
         return
 
     status_map = {'1': 'Running', '2': 'Warning', '3': 'Testing',

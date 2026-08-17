@@ -308,27 +308,39 @@ def toner_with_info(db, toner):
     return d
 
 
+# сколько подряд неудачных SNMP-опросов переводит принтер в серый статус
+SNMP_FAIL_GREY = 5
+
+
 def printer_status(db, printer):
     """Цвет статуса принтера: green/yellow/red/grey.
 
     Принтер с ip_address — по последним SNMP-данным (уровень тонера:
-    ≤5% красный, ≤20% жёлтый, нет данных — серый). Принтер без IP —
+    ≤1% красный, 2–5% жёлтый). Если последние SNMP_FAIL_GREY опросов
+    неудачны (принтер не отвечает) — серый. Принтер без IP —
     по старой логике (заполненность слотов и возраст тонера).
     """
     if printer['ip_address']:
-        row = db.execute(
+        rows = db.execute(
             'SELECT black_level, cyan_level, magenta_level, yellow_level '
-            'FROM snmp_readings WHERE printer_id = ? ORDER BY timestamp DESC LIMIT 1',
-            (printer['id'],)).fetchone()
-        if not row:
-            return 'grey'  # не отвечает или ещё не опрошен
+            'FROM snmp_readings WHERE printer_id = ? ORDER BY timestamp DESC LIMIT ?',
+            (printer['id'], SNMP_FAIL_GREY)).fetchall()
+        if not rows:
+            return 'grey'  # ещё ни разу не опрошен
+        # последняя запись с данными; если среди последних SNMP_FAIL_GREY
+        # записей данных нет — принтер давно не отвечает
+        row = next((r for r in rows if any(
+            r[c] is not None for c in
+            ('black_level', 'cyan_level', 'magenta_level', 'yellow_level'))), None)
+        if row is None:
+            return 'grey'
         if printer['type'] == 'mono':
             level = row['black_level']
             if level is None:
                 return 'grey'
-            if level <= 5:
+            if level <= 1:
                 return 'red'
-            if level <= 20:
+            if level <= 5:
                 return 'yellow'
             return 'green'
         levels = [l for l in (row['black_level'], row['cyan_level'],
@@ -336,9 +348,9 @@ def printer_status(db, printer):
                   if l is not None]
         if not levels:
             return 'grey'
-        if any(l <= 5 for l in levels):
+        if any(l <= 1 for l in levels):
             return 'red'
-        if any(l <= 20 for l in levels):
+        if any(l <= 5 for l in levels):
             return 'yellow'
         return 'green'
     # --- принтер без IP: старая логика по слотам ---

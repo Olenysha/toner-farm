@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Тонер-фарм — учёт тонеров/картриджей для IT-отдела.
 Локальный Flask-сервер для внутренней сети (пилот без авторизации).
@@ -588,6 +588,22 @@ def api_floor_plans_create():
     return jsonify(plan_json(row)), 201
 
 
+@app.route('/api/floor_plans/<int:fid>', methods=['PUT'])
+def api_floor_plans_update(fid):
+    """Переименование этажа."""
+    data = request.get_json(force=True)
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Название этажа обязательно'}), 400
+    db = get_db()
+    if not db.execute('SELECT 1 FROM floor_plans WHERE id=?', (fid,)).fetchone():
+        return jsonify({'error': 'Этаж не найден'}), 404
+    db.execute('UPDATE floor_plans SET name=? WHERE id=?', (name, fid))
+    db.commit()
+    row = db.execute('SELECT * FROM floor_plans WHERE id=?', (fid,)).fetchone()
+    return jsonify(plan_json(row))
+
+
 @app.route('/api/floor_plans/<int:fid>', methods=['DELETE'])
 def api_floor_plans_delete(fid):
     db = get_db()
@@ -900,17 +916,17 @@ if __name__ == '__main__':
         finally:
             s.close()
 
-    # Ищем сертификат для выбранного IP
-    cert = os.path.join(BASE_DIR, f'{local_ip}+2.pem')
-    key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
+    # Сертификат: явные пути из env (Docker монтирует ./certs) или по имени IP
+    cert = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2.pem')
+    key = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
     if os.path.exists(cert) and os.path.exists(key):
         ssl_ctx = (cert, key)
         app.config['HTTPS_ENABLED'] = True
-        print(f'🔒 HTTPS: https://{local_ip}:5000')
+        print(f'[HTTPS] https://{local_ip}:5000')
     else:
         ssl_ctx = None
         app.config['HTTPS_ENABLED'] = False
-        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')
+        print(f'[HTTP]  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')
 
     # Фоновый SNMP-опрос принтеров
     start_snmp_polling()

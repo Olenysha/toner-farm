@@ -131,14 +131,19 @@ function renderEntTable() {
         const floors = floorsCache.filter(f => f.enterprise_id === e.id);
         const floorsHtml = floors.length
             ? floors.map(f =>
-                `<span style="white-space:nowrap">${f.name} <button class="btn btn-sm btn-danger" data-del-floor="${f.id}" title="Удалить этаж">✕</button></span>`
+                `<span style="white-space:nowrap">${f.name} <button class="btn btn-sm btn-secondary" data-edit-floor="${f.id}" title="Переименовать этаж">Изм.</button> <button class="btn btn-sm btn-danger" data-del-floor="${f.id}" title="Удалить этаж">✕</button></span>`
               ).join(', ')
             : '<span style="color:var(--muted)">нет этажей</span>';
         const tr = document.createElement('tr');
         tr.innerHTML = `<td><b>${e.name}</b></td><td>${floorsHtml}</td>
-            <td><button class="btn btn-sm btn-danger" data-del-ent="${e.id}" title="Удалить предприятие">✕</button></td>`;
+            <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-secondary" data-edit-ent="${e.id}" title="Переименовать предприятие">Изм.</button>
+                <button class="btn btn-sm btn-danger" data-del-ent="${e.id}" title="Удалить предприятие">✕</button>
+            </td>`;
         tb.appendChild(tr);
     });
+    tb.querySelectorAll('[data-edit-ent]').forEach(b => b.onclick = () => editEnterprise(+b.dataset.editEnt));
+    tb.querySelectorAll('[data-edit-floor]').forEach(b => b.onclick = () => editFloor(+b.dataset.editFloor));
     tb.querySelectorAll('[data-del-ent]').forEach(b => b.onclick = () => delEnterprise(+b.dataset.delEnt));
     tb.querySelectorAll('[data-del-floor]').forEach(b => b.onclick = () => delFloor(+b.dataset.delFloor));
 }
@@ -167,6 +172,45 @@ document.getElementById('fl-add').onclick = async () => {
         renderEntTable();
     } catch (e) { toast(e.message, 'err'); }
 };
+
+// Модалка переименования: общий код для предприятия и этажа
+function renameModal(title, oldName, onSave) {
+    showModal(title,
+        `<label>Название</label><input type="text" id="rename-input" value="${oldName.replace(/"/g, '&quot;')}">`,
+        [
+            { label: 'Сохранить', keepOpen: true, onClick: async () => {
+                const name = document.getElementById('rename-input').value.trim();
+                if (!name) { toast('Введите название', 'err'); return; }
+                try {
+                    await onSave(name);
+                    closeModal();
+                    toast('Сохранено', 'ok');
+                } catch (e) { toast(e.message, 'err'); }
+            }},
+            { label: 'Отмена', cls: 'btn-secondary' }]);
+    const inp = document.getElementById('rename-input');
+    inp.focus();
+    inp.select();
+}
+
+function editEnterprise(id) {
+    const e = entCache.find(x => x.id === id);
+    if (!e) return;
+    renameModal('Переименовать предприятие', e.name, async name => {
+        await api('/api/enterprises/' + id, 'PUT', { name });
+        await loadEnterprises();
+    });
+}
+
+function editFloor(id) {
+    const f = floorsCache.find(x => x.id === id);
+    if (!f) return;
+    renameModal('Переименовать этаж', f.name, async name => {
+        await api('/api/floor_plans/' + id, 'PUT', { name });
+        await loadFloors();
+        renderEntTable();
+    });
+}
 
 async function delEnterprise(id) {
     showModal('Удаление', '<p>Удалить предприятие?</p>', [

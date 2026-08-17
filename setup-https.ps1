@@ -6,7 +6,9 @@
   патчит app.py и выводит инструкцию по установке CA на телефон.
 #>
 $ErrorActionPreference = 'Stop'
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+# $PSCommandPath заполнен при запуске -File; через scriptblock (bat читает
+# файл как UTF-8) он пуст — тогда берём текущую папку (bat уже сделал cd)
+$scriptDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { (Get-Location).Path }
 Set-Location $scriptDir
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -95,6 +97,13 @@ if (Test-Path $caPemSrc) {
     Write-Host "✅ CA-файл для телефона скопирован в static/rootCA.pem" -ForegroundColor Green
 }
 
+# ── 5б. Копия пары для Docker (монтируется в контейнер как ./certs) ────
+$certsDir = Join-Path $scriptDir 'certs'
+New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
+Copy-Item -Path $certPem -Destination (Join-Path $certsDir 'cert.pem') -Force
+Copy-Item -Path $keyPem  -Destination (Join-Path $certsDir 'key.pem') -Force
+Write-Host "✅ Копия сертификата для Docker: certs/cert.pem + certs/key.pem" -ForegroundColor Green
+
 # ── 6. Патчим app.py ─────────────────────────────────────────────────
 $appPy = Join-Path $scriptDir 'app.py'
 $appLines = Get-Content -Path $appPy -Encoding UTF8
@@ -131,17 +140,17 @@ $newBlock = @(
     "        finally:",
     "            s.close()",
     "",
-    "    # Ищем сертификат для выбранного IP",
-    "    cert = os.path.join(BASE_DIR, f'{local_ip}+2.pem')",
-    "    key = os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')",
+    "    # Сертификат: явные пути из env (Docker монтирует ./certs) или по имени IP",
+    "    cert = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2.pem')",
+    "    key = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')",
     "    if os.path.exists(cert) and os.path.exists(key):",
     "        ssl_ctx = (cert, key)",
     "        app.config['HTTPS_ENABLED'] = True",
-    "        print(f'🔒 HTTPS: https://{local_ip}:5000')",
+    "        print(f'[HTTPS] https://{local_ip}:5000')",
     "    else:",
     "        ssl_ctx = None",
     "        app.config['HTTPS_ENABLED'] = False",
-    "        print(f'⚠️  HTTP:  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')",
+    "        print(f'[HTTP]  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')",
     "",
     "    # Фоновый SNMP-опрос принтеров",
     "    start_snmp_polling()",
