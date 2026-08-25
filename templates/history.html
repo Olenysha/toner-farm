@@ -19,7 +19,7 @@
 </div>
 <div class="card table-wrap">
     <table>
-        <thead><tr><th>Дата/время</th><th>Тип</th><th>Тонер</th><th>EAN-13</th><th>Принтер</th></tr></thead>
+        <thead><tr><th>Дата/время</th><th>Тип</th><th>Тонер</th><th>EAN-13</th><th>Принтер</th><th>Кто</th></tr></thead>
         <tbody id="hist-body"></tbody>
     </table>
 </div>
@@ -49,10 +49,10 @@ async function load() {
         tr.innerHTML = `<td>${r.timestamp}</td><td>${typeRu[r.type] || r.type}</td>
             <td>${r.model_name || '—'} ${r.color ? colorChip(r.color) : ''}</td>
             <td style="font-family:monospace">${r.ean_13 || '—'}</td>
-            <td>${r.printer_name || '—'}</td>`;
+            <td>${r.printer_name || '—'}</td><td>${r.user_name || '—'}</td>`;
         tb.appendChild(tr);
     });
-    if (!rows.length) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Нет записей</td></tr>';
+    if (!rows.length) tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">Нет записей</td></tr>';
 }
 
 api(withEnt('/api/printers')).then(ps => {

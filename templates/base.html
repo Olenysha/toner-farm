@@ -13,9 +13,14 @@
     <a href="/scan" class="{{ 'active' if request.path == '/scan' }}">Скан</a>
     <a href="/history" class="{{ 'active' if request.path == '/history' }}">История</a>
     <a href="/stats" class="{{ 'active' if request.path == '/stats' }}">Статистика</a>
-    <a href="/availability" class="{{ 'active' if request.path == '/availability' }}">Наличие</a>
+    <a href="/availability" id="nav-availability" class="{{ 'active' if request.path == '/availability' }}">Наличие</a>
+    {% if auth_role == 'edit' %}
     <a href="/admin" class="{{ 'active' if request.path == '/admin' }}">Админ</a>
+    {% endif %}
     <select id="ent-select" class="ent-select" title="Предприятие" style="display:none"></select>
+    {% if auth_user %}
+    <span style="margin-left:auto;color:var(--muted);font-size:13px">{{ auth_user['name'] }} <a href="/logout" style="color:var(--muted)">· выйти</a></span>
+    {% endif %}
 </nav>
 <main>
     {% block content %}{% endblock %}
@@ -77,6 +82,10 @@ async function api(url, method, data) {
         opts.body = JSON.stringify(data);
     }
     const r = await fetch(url, opts);
+    if (r.status === 401) {  // сессия истекла — на страницу входа
+        location.href = '/login?next=' + encodeURIComponent(location.pathname);
+        throw new Error('Требуется вход');
+    }
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ('Ошибка ' + r.status));
     return j;
@@ -124,6 +133,19 @@ function statusDot(color) {
     const ru = { green: 'в порядке', yellow: 'тонер стареет', red: 'пустой слот', grey: 'нет данных' };
     return `<span class="dot dot-${color}"></span>${ru[color] || ''}`;
 }
+
+// ❗ на пункте «Наличие», если какого-то цвета меньше, чем принтеров этой модели
+(async function () {
+    try {
+        const groups = await api(withEnt('/api/availability'));
+        const low = groups.some(g =>
+            Object.values(g.colors).some(n => n < g.printers.length));
+        if (low) {
+            const link = document.getElementById('nav-availability');
+            if (link) link.innerHTML += ' <span style="color:var(--err)" title="Картриджей меньше, чем принтеров — пора заказывать">❗</span>';
+        }
+    } catch (e) { /* нет данных — без значка */ }
+})();
 </script>
 {% block scripts %}{% endblock %}
 </body>

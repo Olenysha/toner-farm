@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход — Тонер-фарм</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; background: #0f172a; color: #e2e8f0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .card {
+    width: 340px; padding: 28px; background: #1e293b; border-radius: 12px;
+    border: 1px solid #334155;
+  }
+  h2 { margin: 0 0 4px; font-size: 20px; }
+  .sub { color: #94a3b8; font-size: 13px; margin-bottom: 14px; }
+  label { display: block; font-size: 13px; margin: 12px 0 4px; color: #cbd5e1; }
+  input {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #475569;
+    background: #0f172a; color: #e2e8f0; font-size: 14px;
+  }
+  input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+  button {
+    margin-top: 16px; width: 100%; padding: 10px; border: 0; border-radius: 8px;
+    background: #3b82f6; color: #fff; font-size: 15px; cursor: pointer;
+  }
+  button:hover { background: #2563eb; }
+  .err { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .hint { color: #64748b; font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Тонер-фарм</h2>
+  <div class="sub">Вход по доменной учётной записи (farm.local)</div>
+  {% if error %}
+  <div class="err">{{ error }}</div>
+  {% endif %}
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="next" value="{{ request.args.get('next') or '/' }}">
+    <label>Логин</label>
+    <input name="username" autofocus autocomplete="username" required>
+    <label>Пароль</label>
+    <input type="password" name="password" autocomplete="current-password" required>
+    <button type="submit">Войти</button>
+  </form>
+  <div class="hint">Роль определяется членством в группах {{ groups_hint }}.</div>
+</div>
+</body>
+</html>

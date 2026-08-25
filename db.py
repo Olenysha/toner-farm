@@ -154,6 +154,9 @@ def migrate_db(db):
     cols = [r[1] for r in db.execute('PRAGMA table_info(printers)')]
     if 'floor_id' not in cols:
         db.execute('ALTER TABLE printers ADD COLUMN floor_id INTEGER')
+    ocols = [r[1] for r in db.execute('PRAGMA table_info(operations)')]
+    if 'user_name' not in ocols:
+        db.execute('ALTER TABLE operations ADD COLUMN user_name TEXT')
     plans = db.execute('SELECT * FROM floor_plans ORDER BY id').fetchall()
     if '5 этаж' not in {p['name'] for p in plans}:
         if plans:

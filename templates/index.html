@@ -225,7 +225,7 @@ let snmpCache = {};
 
 function tipMiniBar(label, val, baseColor) {
     const pct = Math.min(100, Math.max(0, val));
-    const c = pct <= 5 ? '#ef4444' : pct <= 20 ? '#eab308' : baseColor;
+    const c = pct <= 1 ? '#ef4444' : pct <= 5 ? '#eab308' : baseColor;
     return `<div class="tip-bar">
         <span class="tip-bar-label">${label}</span>
         <span class="tip-bar-track"><span style="width:${pct}%;background:${c}"></span></span>
@@ -249,6 +249,12 @@ function tipHtml(p) {
             if (s.yellow_level !== null && s.yellow_level !== undefined)
                 html += tipMiniBar('Y', s.yellow_level, '#eab308');
         }
+        // барабаны (если принтер отдаёт их по SNMP)
+        ((s.raw_data && s.raw_data.drums) || []).forEach(d => {
+            if (d.pct === null || d.pct === undefined) return;
+            const label = (d.desc || 'Drum').replace(/drum cartridge/i, 'Барабан');
+            html += tipMiniBar(label, d.pct, '#9ca3af');
+        });
         // алерты с расшифровкой
         if (s.alerts && s.alerts.length) {
             html += '<div class="tip-alerts">' +
@@ -309,7 +315,7 @@ function timeAgo(ts) {
 
 function tonerBar(label, val, baseColor) {
     const pct = Math.min(100, Math.max(0, val));
-    const color = pct <= 5 ? 'var(--err)' : pct <= 20 ? 'var(--warn)' : baseColor;
+    const color = pct <= 1 ? 'var(--err)' : pct <= 5 ? 'var(--warn)' : baseColor;
     return `
         <div style="margin:8px 0">
             <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px">
@@ -347,6 +353,11 @@ async function showPrinter(p) {
         } else if (snmp.black_level !== null && snmp.black_level !== undefined) {
             html += tonerBar('Тонер', snmp.black_level, 'var(--ok)');
         }
+        // барабаны (если принтер их отдаёт по SNMP)
+        const drums = (snmp.raw_data && snmp.raw_data.drums) || [];
+        drums.forEach(d => {
+            if (d.pct !== null && d.pct !== undefined) html += tonerBar('Барабан: ' + d.desc, d.pct, '#6b7280');
+        });
         if (snmp.page_counter) {
             html += `<p style="font-size:13px;color:var(--muted);margin-top:8px">
                 Всего отпечатано: ${Number(snmp.page_counter).toLocaleString('ru-RU')} стр.</p>`;

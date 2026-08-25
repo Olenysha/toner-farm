@@ -195,16 +195,17 @@ async def _poll_printer(db, pid, ip, model, name):
     maxcaps = await _snmp_walk(ip, '1.3.6.1.2.1.43.11.1.1.8')
 
     black_level = cyan_level = magenta_level = yellow_level = None
+    drums = []  # барабаны/фотобарабаны — не тонер, показываем отдельно
 
     if levels:
         desc_map = {oid.split('.')[-1]: val.lower() for oid, val in descriptions}
+        desc_orig = {oid.split('.')[-1]: val for oid, val in descriptions}
         max_map = {oid.split('.')[-1]: val for oid, val in maxcaps}
 
         for oid, val in levels:
             idx = oid.split('.')[-1]
-            color = color_from_desc(desc_map.get(idx, ''))
-            if color is None:
-                continue
+            desc = desc_map.get(idx, '')
+            color = color_from_desc(desc)
             maxcap = max_map.get(idx, '0')
             try:
                 level = int(val)
@@ -216,6 +217,12 @@ async def _poll_printer(db, pid, ip, model, name):
             except ValueError:
                 continue
             if pct is None:
+                continue
+            if color is None:
+                if 'drum' in desc:  # барабан: запоминаем ресурс
+                    # отрезаем PN/SN-хвост, оставляем короткое имя (Drum Cartridge (R1))
+                    drums.append({'desc': re.split(r'[;,]', desc_orig.get(idx, desc))[0].strip(),
+                                  'pct': pct})
                 continue
             if color == 'black':
                 black_level = pct
@@ -252,8 +259,8 @@ async def _poll_printer(db, pid, ip, model, name):
            VALUES (?,?,?,?,?,?,?,?,?,?)''',
         (pid, now_str(), black_level, cyan_level, magenta_level, yellow_level,
          page_counter, status_text, json.dumps(alerts, ensure_ascii=False),
-         json.dumps({'sys_name': sys_name, 'sys_descr': sys_descr},
-                    ensure_ascii=False)))
+         json.dumps({'sys_name': sys_name, 'sys_descr': sys_descr,
+                    'drums': drums}, ensure_ascii=False)))
     db.commit()
 
 

@@ -1,7 +1,7 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Тонер-фарм — учёт тонеров/картриджей для IT-отдела.
-Локальный Flask-сервер для внутренней сети (пилот без авторизации).
+Локальный Flask-сервер для внутренней сети. Авторизация — доменная (AD/LDAP).
 
 Модули:
 - db.py           — пути, схема SQLite, миграции, сид, бэкапы, хелперы
@@ -11,36 +11,69 @@
 """
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from io import BytesIO
 
 import qrcode
-from flask import (Flask, jsonify, render_template, request, send_file,
-                   send_from_directory, url_for)
+from flask import (Flask, jsonify, redirect, render_template, request,
+                   send_file, send_from_directory, session, url_for)
 from openpyxl import Workbook
 from PIL import Image, ImageDraw
 
-from db import (BASE_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH, SLOT_COLUMN,
+import auth
+from db import (BASE_DIR, DATA_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH, SLOT_COLUMN,
                 get_db, close_db, init_db, maybe_backup, row_to_dict,
                 get_barcode, toner_with_info, serialize_printer, now_str)
 from snmp_monitor import start_snmp_polling
-
-# v2: авторизация / AD-интеграция — сейчас пилот без логина, операции пишутся без подписи пользователя
 
 app = Flask(__name__)
 # True, когда сервер запущен с TLS-сертификатом (выставляется в __main__);
 # по флагу base.html решает, нужен ли редирект http → https
 app.config.setdefault('HTTPS_ENABLED', False)
+app.secret_key = auth.load_or_create_secret(DATA_DIR)
+app.permanent_session_lifetime = timedelta(days=auth.SESSION_DAYS)
 
 app.teardown_appcontext(close_db)
 
 
+@app.context_processor
+def inject_auth():
+    """Текущий пользователь/роль во все шаблоны (шапка, скрытие Админа)."""
+    u = auth.current_user()
+    return {'auth_user': u, 'auth_role': u['role'] if u else None}
+
+
 @app.before_request
 def before_request():
+    # защита: без логина — только страница входа (у неё inline-стили)
+    public = {'login'}
+    if request.endpoint in public:
+        return
+    user = auth.current_user()
+    if not user:
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'Требуется вход', 'login': '/login'}), 401
+        return redirect('/login?next=' + request.path)
+    # роли: view — только чтение; изменения (POST/PUT/DELETE) и админка — edit
+    if user['role'] != 'edit':
+        mutating = request.method not in ('GET', 'HEAD', 'OPTIONS')
+        admin_page = request.endpoint in ('admin', 'qr_print')
+        if mutating or admin_page:
+            if request.path.startswith('/api/') or mutating:
+                return jsonify({'error': 'Недостаточно прав: нужна группа TonerFarm-Edit'}), 403
+            return redirect('/')
     maybe_backup()
 
 
 # ------------------------------------------------- План этажа (заглушка PIL)
+
+def _log_op(db, toner_id, printer_id, otype, old_toner_id, ts):
+    """Запись операции с подписью текущего пользователя (из сессии)."""
+    u = auth.current_user()
+    db.execute(
+        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp, user_name)"
+        " VALUES (?,?,?,?,?,?)",
+        (toner_id, printer_id, otype, old_toner_id, ts, u['name'] if u else None))
 
 def ensure_floor_plan():
     """Рисуем простой план-заглушку, если файла нет."""
@@ -71,6 +104,31 @@ def ensure_floor_plan():
 
 
 # ------------------------------------------------------------------ Страницы
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Вход по доменной учётке. Пока без принудительной защиты остальных роутов."""
+    if auth.current_user():
+        return redirect(request.args.get('next') or '/')
+    error = None
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        role = auth.try_login(username, password)
+        if role:
+            auth.login_session(username.strip().split('\\')[-1].split('@')[0], role)
+            return redirect(request.form.get('next') or '/')
+        error = (f'Неверный логин/пароль, нет членства в группах '
+                 f'{auth.VIEW_GROUP}/{auth.EDIT_GROUP} или домен недоступен')
+    return render_template('login.html', error=error,
+                           groups_hint=f'{auth.VIEW_GROUP} / {auth.EDIT_GROUP}')
+
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect('/login')
+
 
 @app.route('/')
 def index():
@@ -198,9 +256,7 @@ def _add_stock(db, ean, qty, enterprise_id=None):
         cur = db.execute(
             "INSERT INTO toners (ean_13, status, enterprise_id) VALUES (?, 'stock', ?)",
             (ean, eid))
-        db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
-            (cur.lastrowid, None, 'stock_add', None, now_str()))
+        _log_op(db, cur.lastrowid, None, 'stock_add', None, now_str())
 
 
 @app.route('/api/stock/add', methods=['POST'])
@@ -242,9 +298,7 @@ def api_stock_deplete():
         return jsonify({'error': f'На складе только {len(rows)} шт.'}), 400
     for r in rows[:qty]:
         db.execute("UPDATE toners SET status='depleted' WHERE id=?", (r['id'],))
-        db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
-            (r['id'], None, 'depleted', None, now_str()))
+        _log_op(db, r['id'], None, 'depleted', None, now_str())
     db.commit()
     return jsonify({'ok': True, 'depleted': qty})
 
@@ -275,16 +329,12 @@ def api_install():
         # старый тонер из этого слота → списан
         db.execute("UPDATE toners SET status='depleted', current_printer_id=NULL WHERE id=?",
                    (old_toner_id,))
-        db.execute(
-            "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
-            (old_toner_id, printer_id, 'auto_depleted', None, now))
+        _log_op(db, old_toner_id, printer_id, 'auto_depleted', None, now)
     db.execute(
         "UPDATE toners SET status='installed', current_printer_id=?, installed_at=? WHERE id=?",
         (printer_id, now, toner_id))
     db.execute(f'UPDATE printers SET {col}=? WHERE id=?', (toner_id, printer_id))
-    db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
-        (toner_id, printer_id, 'install', old_toner_id, now))
+    _log_op(db, toner_id, printer_id, 'install', old_toner_id, now)
     db.commit()
     p = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
     return jsonify({'ok': True, 'auto_depleted_id': old_toner_id,
@@ -310,9 +360,7 @@ def api_return():
     db.execute(
         "UPDATE toners SET status='stock', current_printer_id=NULL, installed_at=NULL WHERE id=?",
         (toner_id,))
-    db.execute(
-        "INSERT INTO operations (toner_id, printer_id, type, old_toner_id, timestamp) VALUES (?,?,?,?,?)",
-        (toner_id, printer_id, 'return', None, now_str()))
+    _log_op(db, toner_id, printer_id, 'return', None, now_str())
     db.commit()
     return jsonify({'ok': True})
 
@@ -457,6 +505,7 @@ def api_all_printers_snmp():
     for r in rows:
         d = dict(r)
         d['alerts'] = json.loads(d['alerts'] or '[]')
+        d['raw_data'] = json.loads(d['raw_data'] or '{}')
         result.append(d)
     return jsonify(result)
 
@@ -781,14 +830,14 @@ def history_export():
     ws = wb.active
     ws.title = 'История операций'
     ws.append(['Дата/время', 'Тип', 'Модель тонера', 'EAN-13', 'Цвет',
-               'Принтер', 'ID старого тонера'])
+               'Принтер', 'ID старого тонера', 'Пользователь'])
     type_ru = {'install': 'Установка', 'return': 'Возврат на склад',
                'auto_depleted': 'Авто-списание', 'stock_add': 'Приход на склад',
                'depleted': 'Списание'}
     for r in rows:
         ws.append([r['timestamp'], type_ru.get(r['type'], r['type']),
                    r['model_name'], r['ean_13'], r['color'],
-                   r['printer_name'], r['old_toner_id']])
+                   r['printer_name'], r['old_toner_id'], r['user_name']])
     for col_cells in ws.columns:
         width = max(len(str(c.value)) if c.value is not None else 0 for c in col_cells) + 2
         ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)

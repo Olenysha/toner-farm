@@ -21,9 +21,13 @@ async function load() {
     }
     box.innerHTML = '';
     groups.forEach(g => {
-        const colors = Object.entries(g.colors).map(([color, n]) =>
-            `<div class="avail-color${n === 0 ? ' avail-zero' : ''}">${colorChip(color)} <b>${n}&nbsp;шт.</b></div>`
-        ).join('');
+        const prnCount = g.printers.length;
+        const colors = Object.entries(g.colors).map(([color, n]) => {
+            // картриджей на складе меньше, чем принтеров этой модели — пора заказывать
+            const low = n < prnCount;
+            const warn = low ? ' <span style="color:var(--err)" title="Картриджей меньше, чем принтеров этой модели — пора заказывать">❗</span>' : '';
+            return `<div class="avail-color${n === 0 ? ' avail-zero' : ''}">${colorChip(color)} <b>${n}&nbsp;шт.</b>${warn}</div>`;
+        }).join('');
         const el = document.createElement('div');
         el.className = 'card';
         el.innerHTML = `
