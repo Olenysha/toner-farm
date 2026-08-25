@@ -60,7 +60,7 @@ def before_request():
         admin_page = request.endpoint in ('admin', 'qr_print')
         if mutating or admin_page:
             if request.path.startswith('/api/') or mutating:
-                return jsonify({'error': 'Недостаточно прав: нужна группа TonerFarm-Edit'}), 403
+                return jsonify({'error': f'Недостаточно прав: нужна группа {auth.EDIT_GROUP}'}), 403
             return redirect('/')
     maybe_backup()
 
@@ -114,9 +114,10 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '')
         password = request.form.get('password', '')
-        role = auth.try_login(username, password)
-        if role:
-            auth.login_session(username.strip().split('\\')[-1].split('@')[0], role)
+        result = auth.try_login(username, password)
+        if result:
+            role, canonical = result
+            auth.login_session(canonical, role)
             return redirect(request.form.get('next') or '/')
         error = (f'Неверный логин/пароль, нет членства в группах '
                  f'{auth.VIEW_GROUP}/{auth.EDIT_GROUP} или домен недоступен')

@@ -3,7 +3,7 @@
 
 Роли по AD-группам (членство проверяется при входе):
 - TonerFarm-View — чтение (карта, склад, история, статистика)
-- TonerFarm-Edit — то же + изменения данных и админка
+- IT_support — то же + изменения данных и админка
 
 Домен и имена групп переопределяются переменными окружения
 TF_DOMAIN / TF_BASE_DN / TF_LDAP_PORT / TF_VIEW_GROUP / TF_EDIT_GROUP —
@@ -27,7 +27,7 @@ BASE_DN = os.environ.get(
 LDAP_PORT = int(os.environ.get('TF_LDAP_PORT', '389'))  # простой LDAP без TLS
 LDAP_TIMEOUT = 5                     # секунд на подключение/ответ контроллера
 VIEW_GROUP = os.environ.get('TF_VIEW_GROUP', 'TonerFarm-View')
-EDIT_GROUP = os.environ.get('TF_EDIT_GROUP', 'TonerFarm-Edit')
+EDIT_GROUP = os.environ.get('TF_EDIT_GROUP', 'IT_support')
 SESSION_DAYS = 30
 
 
@@ -46,10 +46,15 @@ def load_or_create_secret(data_dir):
 
 
 def _groups_of(conn, username):
-    """memberOf пользователя → set имён групп (CN). Пустой set = нет доступа."""
+    """memberOf пользователя → set имён групп (CN). Пустой set = нет доступа.
+
+    Ищем и по sAMAccountName (abramovv), и по userPrincipalName
+    (Vladimir.Abramov@geropharm.com) — пользователь мог ввести любое.
+    """
     import ldap3
     safe = ldap3.utils.conv.escape_filter_chars(username)
-    conn.search(BASE_DN, f'(sAMAccountName={safe})',
+    conn.search(BASE_DN,
+                f'(|(sAMAccountName={safe})(userPrincipalName={safe}))',
                 search_scope=ldap3.SUBTREE, attributes=['memberOf'],
                 time_limit=LDAP_TIMEOUT)
     if not conn.entries:
@@ -73,26 +78,36 @@ def _role_of(groups):
 
 
 def try_login(username, password):
-    """Проверка логина/пароля через LDAP. Возвращает роль или None.
+    """Проверка логина/пароля через LDAP. Возвращает (роль, canonical_name).
 
-    None — и при неверном пароле, и при недоступном AD, и когда
-    пользователь не входит ни в одну из групп TonerFarm-*.
+    Принимает любой формат: sAMAccountName (abramovv), FARM\\abramovv,
+    UPN (Vladimir.Abramov@geropharm.com). None — при неверном пароле,
+    недоступном AD или отсутствии членства в группах.
     """
-    username = (username or '').strip().split('\\')[-1].split('@')[0]
+    username = (username or '').strip()
     if not username or not password:
         return None
+    # Формат бинда: если ввели UPN (с @) — используем как есть,
+    # иначе sAMAccountName@DOMAIN
+    if '\\' in username:
+        username = username.split('\\')[-1]
+    bind_user = username if '@' in username else f'{username}@{DOMAIN}'
     import ldap3
     server = ldap3.Server(DOMAIN, port=LDAP_PORT, get_info=ldap3.NONE,
                           connect_timeout=LDAP_TIMEOUT)
     try:
-        conn = ldap3.Connection(server, user=f'{username}@{DOMAIN}',
-                                password=password,
+        conn = ldap3.Connection(server, user=bind_user, password=password,
                                 authentication=ldap3.SIMPLE, auto_bind=True,
                                 receive_timeout=LDAP_TIMEOUT)
     except Exception:
         return None
     try:
-        return _role_of(_groups_of(conn, username))
+        role = _role_of(_groups_of(conn, username))
+        if not role:
+            return None
+        # canonical name для подписи операций: sAMAccountName, а не как ввели
+        canonical = username.split('@')[0].lower()
+        return role, canonical
     except Exception:
         return None
     finally:
