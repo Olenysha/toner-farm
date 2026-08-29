@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
+﻿"""
 Тонер-фарм — учёт тонеров/картриджей для IT-отдела.
 Локальный Flask-сервер для внутренней сети. Авторизация — доменная (AD/LDAP).
 
@@ -46,7 +45,7 @@ def inject_auth():
 @app.before_request
 def before_request():
     # защита: без логина — только страница входа (у неё inline-стили)
-    public = {'login'}
+    public = {'login', 'static', 'static_from_root'}
     if request.endpoint in public:
         return
     user = auth.current_user()
@@ -981,4 +980,4 @@ if __name__ == '__main__':
     # Фоновый SNMP-опрос принтеров
     start_snmp_polling()
 
-    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)
+    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx, threaded=True)
