@@ -155,7 +155,7 @@ $newBlock = @(
     "    # Фоновый SNMP-опрос принтеров",
     "    start_snmp_polling()",
     "",
-    "    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx)"
+    "    app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx, threaded=True)"
 )
 
 if ($startIndex -ge 0) {
