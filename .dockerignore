@@ -14,9 +14,10 @@ last_ip.txt
 mkcert.exe
 certs/
 
-# Windows-обвязка в контейнере не нужна
-*.bat
-*.ps1
+# Windows-обвязка и утилиты в контейнере не нужны
+tools/
+**/*.bat
+**/*.ps1
 
 # Прочее
 *.md

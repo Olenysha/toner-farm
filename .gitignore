@@ -20,9 +20,6 @@ certs/
 # Доклад для презентации — в репозиторий не входит
 PRESENTATION.md
 
-# Локальные Windows-скрипты и диагностика (хост-специфичные, не для образа)
-tools/windows/
-
 # OS
 Thumbs.db
 .DS_Store
