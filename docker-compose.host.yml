@@ -1,0 +1,12 @@
+# Override для запуска на Linux с сетевым стеком хоста.
+# В этом режиме контейнер слушает порты прямо на интерфейсах хоста,
+# поэтому приложение доступно по IP локалки (не только по localhost).
+#
+# Использование:
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+#
+# ⚠️ network_mode: host не работает на Docker Desktop для Windows/Mac.
+services:
+  toner-farm:
+    network_mode: host
+    ports: []  # при host-сети порт-мэппинг не используется

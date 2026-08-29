@@ -31,9 +31,33 @@ docker compose up -d --build
 
 Откройте `http://<host>:5000/login`.
 
+> ⚠️ **Docker Desktop для Windows по умолчанию открывает порт только на `localhost`**.
+> Если `http://<host-ip>:5000` не открывается с телефона/другого компа, см. раздел
+> «Доступ из локальной сети» ниже.
+
 Если домен AD недоступен, используйте локальный fallback-логин:
 - логин: `admin`
 - пароль: из переменной `TF_LOCAL_ADMIN_PASSWORD` (по умолчанию — пустой, т.е. выключен)
+
+### Доступ из локальной сети
+
+По умолчанию `docker compose up` мапит порт `5000` на все интерфейсы хоста.
+Если с другого устройства не открывается — причина почти всегда в сетевом стеке Docker:
+
+- **Linux (рекомендуется для продакшена):** используйте сетевой стек хоста —
+  тогда приложение слушает порты прямо на интерфейсах машины:
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+  ```
+
+- **Docker Desktop для Windows:** он пробрасывает порт только на `localhost`.
+  Варианты:
+  1. Пробросить порт через `netsh` (администратор):
+     ```powershell
+     netsh interface portproxy add v4tov4 listenport=5000 listenaddress=0.0.0.0 connectport=5000 connectaddress=127.0.0.1
+     ```
+     и открыть TCP 5000 в брандмауэре (`tools/windows/open-port-5000.bat`).
+  2. Или использовать reverse proxy на хосте.
 
 ### HTTPS для телефона
 
