@@ -1,0 +1,29 @@
+{
+  "_comment": "Демо-данные для пилота. Применяются только если таблицы printers/barcode_map пусты.",
+  "printers": [
+    {"name": "HP M477fdn (Коворкинг)", "model": "HP Color LaserJet MFP M477fdn", "type": "color", "slots_count": 4, "x": 20.0, "y": 30.0, "ip_address": "10.7.150.201"},
+    {"name": "HP M277dw (Медпредставители)", "model": "HP Color LaserJet MFP M277dw", "type": "color", "slots_count": 4, "x": 55.0, "y": 60.0, "ip_address": "10.7.200.87"},
+    {"name": "HP M477fdn (Кузьмин)", "model": "HP Color LaserJet MFP M477fdn", "type": "color", "slots_count": 4, "x": 80.0, "y": 25.0, "ip_address": "10.7.150.242"},
+    {"name": "HP M479fdn (Секретарь ГД)", "model": "HP Color LaserJet Pro MFP M479fdn", "type": "color", "slots_count": 4, "x": 40.0, "y": 50.0, "ip_address": "10.7.150.239"},
+    {"name": "HP M251n (Buh этикетки)", "model": "HP LaserJet 200 color M251n", "type": "color", "slots_count": 4, "x": 15.0, "y": 70.0, "ip_address": "10.7.150.91"},
+    {"name": "Kyocera MA4000cix (Кадры)", "model": "Kyocera ECOSYS MA4000cix", "type": "color", "slots_count": 4, "x": 60.0, "y": 20.0, "ip_address": "10.7.150.235"},
+    {"name": "Kyocera MA4000cix (ЗП)", "model": "Kyocera ECOSYS MA4000cix", "type": "color", "slots_count": 4, "x": 65.0, "y": 25.0, "ip_address": "10.7.150.244"},
+    {"name": "Kyocera MA4000cix (Ресепшен)", "model": "Kyocera ECOSYS MA4000cix", "type": "color", "slots_count": 4, "x": 70.0, "y": 30.0, "ip_address": "10.7.150.243"},
+    {"name": "Kyocera MA4000cix (Экон.безоп.)", "model": "Kyocera ECOSYS MA4000cix", "type": "color", "slots_count": 4, "x": 75.0, "y": 35.0, "ip_address": "10.7.150.246"},
+    {"name": "Kyocera P3155dn BUH", "model": "Kyocera ECOSYS P3155dn", "type": "mono", "slots_count": 1, "x": 50.0, "y": 40.0, "ip_address": "10.7.150.237"},
+    {"name": "Kyocera P3155dn SALE", "model": "Kyocera ECOSYS P3155dn", "type": "mono", "slots_count": 1, "x": 55.0, "y": 45.0, "ip_address": "10.7.150.236"},
+    {"name": "Kyocera TASKalfa 3252ci (HR/LOG)", "model": "Kyocera TASKalfa 3252ci", "type": "color", "slots_count": 4, "x": 30.0, "y": 15.0, "ip_address": "10.7.150.231"},
+    {"name": "Kyocera TASKalfa 3252ci (LAW/SALE)", "model": "Kyocera TASKalfa 3252ci", "type": "color", "slots_count": 4, "x": 35.0, "y": 20.0, "ip_address": "10.7.150.232"},
+    {"name": "Kyocera TASKalfa 3253ci (FIN)", "model": "Kyocera TASKalfa 3253ci", "type": "color", "slots_count": 4, "x": 45.0, "y": 25.0, "ip_address": "10.7.150.233"},
+    {"name": "Xerox WC 7220", "model": "Xerox WorkCentre 7220", "type": "color", "slots_count": 4, "x": 85.0, "y": 80.0, "ip_address": "10.7.150.241"}
+  ],
+  "barcodes": [
+    {"ean_13": "0886111244457", "model_name": "HP CF410A (410A)", "color": "Black", "compatible_printers": ["HP Color LaserJet M452"], "page_yield": 2300},
+    {"ean_13": "0886111244464", "model_name": "HP CF411A (410A)", "color": "Cyan", "compatible_printers": ["HP Color LaserJet M452"], "page_yield": 2300}
+  ],
+  "toners": [
+    {"ean_13": "0886111244457"},
+    {"ean_13": "0886111244457"},
+    {"ean_13": "0886111244464"}
+  ]
+}

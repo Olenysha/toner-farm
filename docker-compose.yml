@@ -5,17 +5,29 @@ services:
     ports:
       - "5000:5000"
     environment:
-      # HTTPS внутри контейнера: пара из ./certs (кладёт туда setup-https.bat)
-      - CERT_FILE=/app/certs/cert.pem
-      - KEY_FILE=/app/certs/key.pem
+      - DATA_DIR=/app/data
+      - TF_DOMAIN=${TF_DOMAIN:-farm.local}
+      - TF_LDAP_PORT=${TF_LDAP_PORT:-389}
+      - TF_VIEW_GROUP=${TF_VIEW_GROUP:-TonerFarm-View}
+      - TF_EDIT_GROUP=${TF_EDIT_GROUP:-IT_support}
+      - TF_LOCAL_ADMIN=${TF_LOCAL_ADMIN:-admin}
+      - TF_LOCAL_ADMIN_PASSWORD=${TF_LOCAL_ADMIN_PASSWORD:-}
+      - SNMP_COMMUNITY=${SNMP_COMMUNITY:-public}
+      - SNMP_INTERVAL=${SNMP_INTERVAL:-600}
+      # Для HTTPS внутри контейнера положите пару в ./certs и раскомментируйте:
+      # - CERT_FILE=/app/certs/cert.pem
+      # - KEY_FILE=/app/certs/key.pem
     volumes:
-      # единые базы с хоста — те же файлы, что использует start.bat,
-      # никаких отдельных копий в ./data
-      - ./database.db:/app/data/database.db
-      - ./alerts.db:/app/data/alerts.db
-      - ./backups:/app/data/backups
-      # загруженные планы этажей и QR-стикеры сохраняются на хосте
+      # Единый каталог данных: database.db, alerts.db, backups
+      - ./data:/app/data
+      # Загруженные планы этажей и QR-стикеры сохраняются на хосте
       - ./static:/app/static
-      # HTTPS-сертификат (setup-https.bat обновляет certs/ при смене IP)
-      - ./certs:/app/certs:ro
+      # HTTPS-сертификат (опционально). Раскомментировать вместе с env выше.
+      # - ./certs:/app/certs:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

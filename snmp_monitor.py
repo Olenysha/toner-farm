@@ -17,15 +17,9 @@ from pysnmp.hlapi.asyncio import (SnmpEngine, CommunityData,
                                   ObjectType, ObjectIdentity,
                                   get_cmd, next_cmd)
 
+from config.constants import (COMMUNITY, SNMP_TIMEOUT, SNMP_INTERVAL,
+                               WALK_MAX_STEPS, SEVERITY_ICON)
 from db import DATABASE, ALERT_DATABASE, now_str
-
-COMMUNITY = 'public'
-SNMP_TIMEOUT = 3          # секунд на один SNMP-запрос
-SNMP_INTERVAL = 600       # секунд между фоновыми опросами принтеров
-WALK_MAX_STEPS = 500      # страховка от бесконечного walk
-
-# prtAlertSeverityLevel: other(1), critical(3), serious(4), warning(5)
-SEVERITY_ICON = {'3': '🔴', '4': '🟠', '5': '🟡', '1': 'ℹ️'}
 
 
 def detect_vendor(*texts):

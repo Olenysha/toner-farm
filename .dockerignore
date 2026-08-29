@@ -1,14 +1,14 @@
 .git
 .venv
-__pycache__
-**/__pycache__
-*.pyc
+__pycache__/
+**/*.pyc
 
-# данные и секреты в образ не входят
+# Данные и секреты не попадают в образ
 data/
 backups/
 database.db
 alerts.db
+secret_key
 last_ip.txt
 *.pem
 mkcert.exe
@@ -16,5 +16,10 @@ certs/
 
 # Windows-обвязка в контейнере не нужна
 *.bat
-setup-https.ps1
-Принтеры (1).xlsx
+*.ps1
+
+# Прочее
+*.md
+*.xlsx
+Dockerfile*
+docker-compose*.yml

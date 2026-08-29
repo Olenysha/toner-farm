@@ -1,12 +1,13 @@
-﻿"""
+"""
 Тонер-фарм — учёт тонеров/картриджей для IT-отдела.
 Локальный Flask-сервер для внутренней сети. Авторизация — доменная (AD/LDAP).
 
 Модули:
-- db.py           — пути, схема SQLite, миграции, сид, бэкапы, хелперы
-- snmp_monitor.py — фоновый SNMP-опрос принтеров (pysnmp 7, asyncio)
-- alerts_data.py  — справочник кодов SNMP-алертов (RFC 3805)
-- printer_ips.json— карта «имя принтера → IP» для миграции
+- db.py              — пути, схема SQLite, миграции, сид, бэкапы, хелперы
+- snmp_monitor.py    — фоновый SNMP-опрос принтеров (pysnmp 7, asyncio)
+- auth.py            — доменная авторизация и сессии
+- config/constants.py — константы (цвета-слоты, SNMP, карты)
+- config/seed.json   — демо-данные принтеров и штрихкодов
 """
 import json
 import os
@@ -20,7 +21,8 @@ from openpyxl import Workbook
 from PIL import Image, ImageDraw
 
 import auth
-from db import (BASE_DIR, DATA_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH, SLOT_COLUMN,
+from config.constants import ALLOWED_PLAN_EXT, SLOT_COLUMN
+from db import (BASE_DIR, DATA_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH,
                 get_db, close_db, init_db, maybe_backup, row_to_dict,
                 get_barcode, toner_with_info, serialize_printer, now_str)
 from snmp_monitor import start_snmp_polling
@@ -542,7 +544,7 @@ def api_barcode_map_list():
     return jsonify([get_barcode(db, r['ean_13']) for r in rows])
 
 
-ALLOWED_PLAN_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
+# ALLOWED_PLAN_EXT импортирован из config.constants
 
 
 def plan_json(row):
@@ -942,40 +944,17 @@ init_db()
 ensure_floor_plan()
 
 if __name__ == '__main__':
-    import os, socket
-
-    # IP, для которого создан сертификат (setup-https сохраняет его в last_ip.txt)
-    ip_file = os.path.join(BASE_DIR, 'last_ip.txt')
-    if os.path.exists(ip_file):
-        with open(ip_file, 'r', encoding='utf-8-sig') as f:
-            local_ip = f.read().strip()
-        if not local_ip:
-            local_ip = None
-    else:
-        local_ip = None
-
-    # Fallback: авто-определение текущего IP
-    if not local_ip:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(('8.8.8.8', 80))
-            local_ip = s.getsockname()[0]
-        except Exception:
-            local_ip = '127.0.0.1'
-        finally:
-            s.close()
-
-    # Сертификат: явные пути из env (Docker монтирует ./certs) или по имени IP
-    cert = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2.pem')
-    key = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, f'{local_ip}+2-key.pem')
+    # Сертификат: явные пути из env (Docker монтирует ./certs) или ./certs/*.pem
+    cert = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, 'certs', 'cert.pem')
+    key = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, 'certs', 'key.pem')
     if os.path.exists(cert) and os.path.exists(key):
         ssl_ctx = (cert, key)
         app.config['HTTPS_ENABLED'] = True
-        print(f'[HTTPS] https://{local_ip}:5000')
+        print('[HTTPS] https://<host>:5000')
     else:
         ssl_ctx = None
         app.config['HTTPS_ENABLED'] = False
-        print(f'[HTTP]  http://{local_ip}:5000 (сканер не заработает без HTTPS — запусти setup-https.bat)')
+        print('[HTTP]  http://<host>:5000 (сканер не заработает без HTTPS — используй reverse proxy или certs/)')
 
     # Фоновый SNMP-опрос принтеров
     start_snmp_polling()

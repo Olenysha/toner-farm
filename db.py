@@ -9,7 +9,8 @@ from datetime import datetime, date, timedelta
 
 from flask import g
 
-from alerts_data import ALERT_CODES_SEED, ALERT_DB_SCHEMA
+from config.alerts import ALERT_CODES_SEED, ALERT_DB_SCHEMA
+from config.constants import AGING_DAYS, SLOT_COLUMN, SNMP_FAIL_GREY
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 # Данные (БД, бэкапы) можно вынести в отдельный каталог — в Docker это volume
@@ -20,9 +21,7 @@ BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 QR_DIR = os.path.join(STATIC_DIR, 'qr_codes')
 FLOOR_PLAN_PATH = os.path.join(STATIC_DIR, 'floor_plan.png')
-
-# Сколько дней тонер считается «стареющим» (жёлтый статус на карте)
-AGING_DAYS = 60
+CONFIG_DIR = os.path.join(BASE_DIR, 'config')
 
 
 def now_str():
@@ -99,9 +98,7 @@ CREATE TABLE IF NOT EXISTS snmp_readings (
 );
 """
 
-# Соответствие цвета картриджа колонке-слоту принтера
-SLOT_COLUMN = {'Black': 'toner_bk_id', 'Cyan': 'toner_c_id',
-               'Magenta': 'toner_m_id', 'Yellow': 'toner_y_id'}
+# SLOT_COLUMN импортирован из config.constants
 
 
 # ---------------------------------------------------------------- Соединение
@@ -139,14 +136,16 @@ def init_db():
 
 
 def load_ip_map():
-    """Карта «имя принтера → IP» из printer_ips.json (для миграции)."""
-    path = os.path.join(BASE_DIR, 'printer_ips.json')
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    return {k: v for k, v in data.items() if not k.startswith('_')}
+    """Карта «имя принтера → IP» из config/printer_ip_map.json (для миграции)."""
+    for path in (os.path.join(CONFIG_DIR, 'printer_ip_map.json'),
+                 os.path.join(BASE_DIR, 'printer_ips.json')):
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+            return {k: v for k, v in data.items() if not k.startswith('_')}
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 def migrate_db(db):
@@ -216,39 +215,42 @@ def migrate_timestamps_local(db):
 
 
 def seed_db(db):
-    """Демо-данные для пилота: реальные принтеры Герофарм."""
+    """Демо-данные для пилота: загружаются из config/seed.json.
+
+    Применяются только если таблицы пусты, поэтому существующая БД
+    не затирается.
+    """
+    path = os.path.join(CONFIG_DIR, 'seed.json')
+    try:
+        with open(path, encoding='utf-8') as f:
+            seed = json.load(f)
+    except (OSError, ValueError):
+        return
+
     floor_id = db.execute('SELECT MIN(id) FROM floor_plans').fetchone()[0]
     ent_id = db.execute('SELECT MIN(id) FROM enterprises').fetchone()[0]
-    db.executemany(
-        'INSERT INTO printers (name, model, type, slots_count, x, y, floor_id, ip_address) VALUES (?,?,?,?,?,?,?,?)',
-        [
-            ('HP M477fdn (Коворкинг)', 'HP Color LaserJet MFP M477fdn', 'color', 4, 20.0, 30.0, floor_id, '10.7.150.201'),
-            ('HP M277dw (Медпредставители)', 'HP Color LaserJet MFP M277dw', 'color', 4, 55.0, 60.0, floor_id, '10.7.200.87'),
-            ('HP M477fdn (Кузьмин)', 'HP Color LaserJet MFP M477fdn', 'color', 4, 80.0, 25.0, floor_id, '10.7.150.242'),
-            ('HP M479fdn (Секретарь ГД)', 'HP Color LaserJet Pro MFP M479fdn', 'color', 4, 40.0, 50.0, floor_id, '10.7.150.239'),
-            ('HP M251n (Buh этикетки)', 'HP LaserJet 200 color M251n', 'color', 4, 15.0, 70.0, floor_id, '10.7.150.91'),
-            ('Kyocera MA4000cix (Кадры)', 'Kyocera ECOSYS MA4000cix', 'color', 4, 60.0, 20.0, floor_id, '10.7.150.235'),
-            ('Kyocera MA4000cix (ЗП)', 'Kyocera ECOSYS MA4000cix', 'color', 4, 65.0, 25.0, floor_id, '10.7.150.244'),
-            ('Kyocera MA4000cix (Ресепшен)', 'Kyocera ECOSYS MA4000cix', 'color', 4, 70.0, 30.0, floor_id, '10.7.150.243'),
-            ('Kyocera MA4000cix (Экон.безоп.)', 'Kyocera ECOSYS MA4000cix', 'color', 4, 75.0, 35.0, floor_id, '10.7.150.246'),
-            ('Kyocera P3155dn BUH', 'Kyocera ECOSYS P3155dn', 'mono', 1, 50.0, 40.0, floor_id, '10.7.150.237'),
-            ('Kyocera P3155dn SALE', 'Kyocera ECOSYS P3155dn', 'mono', 1, 55.0, 45.0, floor_id, '10.7.150.236'),
-            ('Kyocera TASKalfa 3252ci (HR/LOG)', 'Kyocera TASKalfa 3252ci', 'color', 4, 30.0, 15.0, floor_id, '10.7.150.231'),
-            ('Kyocera TASKalfa 3252ci (LAW/SALE)', 'Kyocera TASKalfa 3252ci', 'color', 4, 35.0, 20.0, floor_id, '10.7.150.232'),
-            ('Kyocera TASKalfa 3253ci (FIN)', 'Kyocera TASKalfa 3253ci', 'color', 4, 45.0, 25.0, floor_id, '10.7.150.233'),
-            ('Xerox WC 7220', 'Xerox WorkCentre 7220', 'color', 4, 85.0, 80.0, floor_id, '10.7.150.241'),
-        ])
-    db.executemany(
-        'INSERT INTO barcode_map (ean_13, model_name, color, compatible_printers, page_yield) VALUES (?,?,?,?,?)',
-        [
-            ('0886111244457', 'HP CF410A (410A)', 'Black',
-             json.dumps(['HP Color LaserJet M452']), 2300),
-            ('0886111244464', 'HP CF411A (410A)', 'Cyan',
-             json.dumps(['HP Color LaserJet M452']), 2300),
-        ])
-    db.executemany(
-        "INSERT INTO toners (ean_13, status, enterprise_id) VALUES (?, 'stock', ?)",
-        [('0886111244457', ent_id), ('0886111244457', ent_id), ('0886111244464', ent_id)])
+
+    printers = seed.get('printers', [])
+    if printers:
+        db.executemany(
+            'INSERT INTO printers (name, model, type, slots_count, x, y, floor_id, ip_address) VALUES (?,?,?,?,?,?,?,?)',
+            [(p['name'], p['model'], p['type'], p['slots_count'],
+              p['x'], p['y'], floor_id, p.get('ip_address'))
+             for p in printers])
+
+    barcodes = seed.get('barcodes', [])
+    if barcodes:
+        db.executemany(
+            'INSERT INTO barcode_map (ean_13, model_name, color, compatible_printers, page_yield) VALUES (?,?,?,?,?)',
+            [(b['ean_13'], b['model_name'], b['color'],
+              json.dumps(b['compatible_printers']), b['page_yield'])
+             for b in barcodes])
+
+    toners = seed.get('toners', [])
+    if toners:
+        db.executemany(
+            "INSERT INTO toners (ean_13, status, enterprise_id) VALUES (?, 'stock', ?)",
+            [(t['ean_13'], ent_id) for t in toners])
 
 
 # ------------------------------------------------------------------ alerts.db
@@ -311,8 +313,7 @@ def toner_with_info(db, toner):
     return d
 
 
-# сколько подряд неудачных SNMP-опросов переводит принтер в серый статус
-SNMP_FAIL_GREY = 5
+# SNMP_FAIL_GREY импортирован из config.constants
 
 
 def printer_status(db, printer):
