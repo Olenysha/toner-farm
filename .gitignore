@@ -12,6 +12,7 @@ logs/
 static/qr_codes/*.png
 last_ip.txt
 secret_key
+tools/windows/fix-fw.log
 
 # TLS-сертификаты и ключи (mkcert, локальный HTTPS)
 *.pem
