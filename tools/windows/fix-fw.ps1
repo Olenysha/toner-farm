@@ -1,5 +1,6 @@
 ﻿try {
-    # 1. Удаляем автоматические блокирующие правила python.exe из обоих сторов
+    Write-Host '[fix-fw] Удаляю блокирующие правила python.exe ...' -ForegroundColor Cyan
+
     $stores = @('ActiveStore', 'PersistentStore')
     $removed = 0
     foreach ($store in $stores) {
@@ -12,26 +13,33 @@
                     if ($app.Program -like '*python*') {
                         Remove-NetFirewallRule -Name $r.Name -PolicyStore $store -ErrorAction SilentlyContinue
                         $removed++
+                        Write-Host ('  удалено: ' + $r.DisplayName + ' (' + $app.Program + ')') -ForegroundColor Green
                     }
                 } catch {}
             }
         } catch {}
     }
 
-    # 2. Удаляем правила с именем python.exe (если есть)
     try {
         Remove-NetFirewallRule -Name 'python.exe' -PolicyStore PersistentStore -ErrorAction SilentlyContinue
         Remove-NetFirewallRule -Name 'python.exe' -PolicyStore ActiveStore -ErrorAction SilentlyContinue
+        Write-Host '  удалены правила с именем python.exe' -ForegroundColor Green
     } catch {}
 
-    # 3. Переводим активное подключение в частный профиль
+    Write-Host '[fix-fw] Перевожу активное подключение в частный профиль ...' -ForegroundColor Cyan
     $profile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' } | Select-Object -First 1
     if ($profile) {
         Set-NetConnectionProfile -InterfaceIndex $profile.InterfaceIndex -NetworkCategory Private
+        Write-Host ('  профиль ' + $profile.Name + ' -> Private') -ForegroundColor Green
+    } else {
+        Write-Host '  активное подключение не найдено' -ForegroundColor Yellow
     }
 
     $log = Join-Path $PSScriptRoot 'fix-fw.log'
     "OK removed=$removed" | Out-File $log -Encoding utf8
+    Write-Host ('[fix-fw] Готово. Удалено правил: ' + $removed) -ForegroundColor Green
 } catch {
-    "ERROR: $_" | Out-File (Join-Path $PSScriptRoot 'fix-fw.log') -Encoding utf8
+    $msg = 'ERROR: ' + $_
+    $msg | Out-File (Join-Path $PSScriptRoot 'fix-fw.log') -Encoding utf8
+    Write-Host $msg -ForegroundColor Red
 }
