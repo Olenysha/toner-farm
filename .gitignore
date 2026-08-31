@@ -8,6 +8,7 @@ database.db
 alerts.db
 backups/
 data/
+logs/
 static/qr_codes/*.png
 last_ip.txt
 secret_key

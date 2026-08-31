@@ -9,10 +9,14 @@
 #>
 $ErrorActionPreference = 'Stop'
 # $PSCommandPath заполнен при запуске -File; через scriptblock (bat читает
-# файл как UTF-8) он пуст — тогда берём текущую папку (bat уже сделал cd)
+# файл как UTF-8) он пуст — тогда берём текущую папку (bat уже сделал cd сюда)
 $scriptDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { (Get-Location).Path }
-# Корень проекта: tools/windows -> ..
-$projectRoot = Split-Path -Parent $scriptDir
+# Корень проекта: скрипт лежит в tools/windows — два уровня вверх
+$projectRoot = $scriptDir
+if ((Split-Path -Leaf $scriptDir) -eq 'windows' -and
+    (Split-Path -Leaf (Split-Path -Parent $scriptDir)) -eq 'tools') {
+    $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+}
 Set-Location $projectRoot
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -77,17 +81,27 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "✅ CA установлен в систему" -ForegroundColor Green
 
-# ── 4. Создаём сертификат для текущего IP ───────────────────────────
+# ── 4. Создаём сертификат для текущего IP (сразу в certs/) ────────────
 $certName = "$localIP+2"
-$certPem = Join-Path $projectRoot "$certName.pem"
-$keyPem  = Join-Path $projectRoot "$certName-key.pem"
+$certsDir = Join-Path $projectRoot 'certs'
+New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
 
 Write-Host "📜 Создаю сертификат для $localIP, localhost, 127.0.0.1..." -ForegroundColor Yellow
-& $mkcertExe $localIP localhost 127.0.0.1
+Push-Location $certsDir
+try {
+    & $mkcertExe $localIP localhost 127.0.0.1
+} finally {
+    Pop-Location
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Ошибка при создании сертификата." -ForegroundColor Red
     exit 1
 }
+# mkcert именует файлы по IP — переименовываем в постоянные cert.pem/key.pem
+$certPem = Join-Path $certsDir 'cert.pem'
+$keyPem  = Join-Path $certsDir 'key.pem'
+Move-Item -Path (Join-Path $certsDir "$certName.pem")     -Destination $certPem -Force
+Move-Item -Path (Join-Path $certsDir "$certName-key.pem") -Destination $keyPem -Force
 Write-Host "✅ Сертификат создан:" -ForegroundColor Green
 Write-Host "   $certPem" -ForegroundColor DarkGray
 Write-Host "   $keyPem" -ForegroundColor DarkGray
@@ -101,14 +115,7 @@ if (Test-Path $caPemSrc) {
     Write-Host "✅ CA-файл для телефона скопирован в static/rootCA.pem" -ForegroundColor Green
 }
 
-# ── 6. Копия пары для Docker (монтируется в контейнер как ./certs) ────
-$certsDir = Join-Path $projectRoot 'certs'
-New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
-Copy-Item -Path $certPem -Destination (Join-Path $certsDir 'cert.pem') -Force
-Copy-Item -Path $keyPem  -Destination (Join-Path $certsDir 'key.pem') -Force
-Write-Host "✅ Копия сертификата для Docker: certs/cert.pem + certs/key.pem" -ForegroundColor Green
-
-# ── 7. Выводим итог ──────────────────────────────────────────────────
+# ── 6. Выводим итог ──────────────────────────────────────────────────
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "   ГОТОВО! Инструкция для телефона:" -ForegroundColor Cyan

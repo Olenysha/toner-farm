@@ -16,6 +16,7 @@
     <a href="/availability" id="nav-availability" class="{{ 'active' if request.path == '/availability' }}">Наличие</a>
     {% if auth_role == 'edit' %}
     <a href="/admin" class="{{ 'active' if request.path == '/admin' }}">Админ</a>
+    <a href="/logs" class="{{ 'active' if request.path == '/logs' }}">Логи</a>
     {% endif %}
     <select id="ent-select" class="ent-select" title="Предприятие" style="display:none"></select>
     {% if auth_user %}

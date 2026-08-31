@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Живые логи — Тонер-фарм</title>
+<style>
+body { font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+header { padding: 12px 16px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+h1 { margin: 0; font-size: 18px; flex: 1 1 auto; }
+button { background: #3b82f6; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+button.secondary { background: #475569; }
+#status { color: #94a3b8; font-size: 13px; }
+#log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.4; padding: 12px; }
+.entry { border-bottom: 1px solid #1e293b; padding: 4px 0; white-space: pre-wrap; word-break: break-word; }
+.entry .ts { color: #94a3b8; }
+.entry .ip { color: #60a5fa; }
+.entry .method { color: #f472b6; font-weight: bold; }
+.entry .path { color: #a3e635; }
+.entry .status2xx { color: #4ade80; }
+.entry .status3xx { color: #facc15; }
+.entry .status4xx { color: #fb923c; }
+.entry .status5xx { color: #f87171; }
+.entry .body { color: #cbd5e1; margin-left: 24px; max-height: 120px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+<h1>📝 Живые логи HTTP</h1>
+<span id="status">подключаемся…</span>
+<button onclick="pauseToggle()" id="pauseBtn">Пауза</button>
+<button class="secondary" onclick="clearLogs()">Очистить</button>
+<a href="/" style="color:#94a3b8;margin-left:auto">← назад</a>
+</header>
+<div id="log"></div>
+<script>
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+let paused = false;
+let reconnectTimer = null;
+let es = null;
+
+function statusColor(ok, text) {
+  statusEl.textContent = text;
+  statusEl.style.color = ok ? '#4ade80' : '#f87171';
+}
+
+function fmtBody(body) {
+  if (body === null || body === undefined) return '';
+  let s = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+  if (s.length > 2000) s = s.slice(0, 2000) + '…';
+  return s;
+}
+
+function addEntry(rec) {
+  if (paused) return;
+  const div = document.createElement('div');
+  div.className = 'entry';
+  const sc = rec.status_code || 0;
+  const scCls = sc >= 500 ? 'status5xx' : sc >= 400 ? 'status4xx' : sc >= 300 ? 'status3xx' : 'status2xx';
+  div.innerHTML = `<span class="ts">${rec.timestamp}</span> ` +
+    `<span class="ip">${rec.real_ip || rec.remote_addr}</span> ` +
+    `<span class="method">${rec.method}</span> ` +
+    `<span class="path">${rec.path}${rec.query ? '?' + rec.query : ''}</span> ` +
+    `<span class="${scCls}">${sc}</span> ` +
+    `<span style="color:#94a3b8">${rec.duration_ms}ms</span>` +
+    (rec.user ? ` <span style="color:#fbbf24">${rec.user}</span>` : '') +
+    (rec.user_agent ? ` <span style="color:#64748b">${rec.user_agent.split(' ')[0]}</span>` : '') +
+    (rec.body ? `<div class="body">${fmtBody(rec.body)}</div>` : '');
+  logEl.prepend(div);
+  while (logEl.children.length > 200) logEl.lastChild.remove();
+}
+
+function connect() {
+  if (es) es.close();
+  statusColor(false, 'подключаемся…');
+  es = new EventSource('/api/logs/stream');
+  es.addEventListener('log', e => {
+    try { addEntry(JSON.parse(e.data)); } catch (err) {}
+  });
+  es.addEventListener('ping', () => statusColor(true, 'подключено (live)'));
+  es.onopen = () => statusColor(true, 'подключено');
+  es.onerror = () => {
+    statusColor(false, 'соединение потеряно — переподключаемся…');
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+}
+
+function pauseToggle() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? 'Продолжить' : 'Пауза';
+}
+function clearLogs() { logEl.innerHTML = ''; }
+
+connect();
+window.addEventListener('beforeunload', () => { if (es) es.close(); });
+</script>
+</body>
+</html>

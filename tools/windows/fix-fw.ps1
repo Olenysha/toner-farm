@@ -16,7 +16,8 @@ try {
         Set-NetConnectionProfile -InterfaceIndex $profile.InterfaceIndex -NetworkCategory Private
     }
 
-    "OK removed=$removed" | Out-File 'E:\Geropharm\BD sklada\toner_farm\fix-fw.log' -Encoding utf8
+    $log = Join-Path $PSScriptRoot 'fix-fw.log'
+    "OK removed=$removed" | Out-File $log -Encoding utf8
 } catch {
-    "ERROR: $_" | Out-File 'E:\Geropharm\BD sklada\toner_farm\fix-fw.log' -Encoding utf8
+    "ERROR: $_" | Out-File (Join-Path $PSScriptRoot 'fix-fw.log') -Encoding utf8
 }

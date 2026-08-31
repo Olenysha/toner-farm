@@ -21,6 +21,7 @@ from openpyxl import Workbook
 from PIL import Image, ImageDraw
 
 import auth
+import request_logger
 from config.constants import ALLOWED_PLAN_EXT, SLOT_COLUMN
 from db import (BASE_DIR, DATA_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH,
                 get_db, close_db, init_db, maybe_backup, row_to_dict,
@@ -33,6 +34,9 @@ app = Flask(__name__)
 app.config.setdefault('HTTPS_ENABLED', False)
 app.secret_key = auth.load_or_create_secret(DATA_DIR)
 app.permanent_session_lifetime = timedelta(days=auth.SESSION_DAYS)
+
+# Логирование всех HTTP-запросов в logs/access.log + SSE на /logs
+request_logger.init_request_logging(app)
 
 app.teardown_appcontext(close_db)
 
