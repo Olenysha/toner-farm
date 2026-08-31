@@ -73,8 +73,10 @@ def _safe_body():
             except Exception:
                 return data[:2000]
         if "application/x-www-form-urlencoded" in ct:
+            from urllib.parse import parse_qs
+            parsed = parse_qs(data, keep_blank_values=True)
             out = {}
-            for key, vals in request.form.lists():
+            for key, vals in parsed.items():
                 if "password" in key.lower():
                     out[key] = "***"
                 else:
