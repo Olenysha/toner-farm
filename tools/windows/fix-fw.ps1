@@ -29,8 +29,12 @@
     Write-Host '[fix-fw] Перевожу активное подключение в частный профиль ...' -ForegroundColor Cyan
     $profile = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' } | Select-Object -First 1
     if ($profile) {
-        Set-NetConnectionProfile -InterfaceIndex $profile.InterfaceIndex -NetworkCategory Private
-        Write-Host ('  профиль ' + $profile.Name + ' -> Private') -ForegroundColor Green
+        if ($profile.NetworkCategory -eq 'DomainAuthenticated') {
+            Write-Host ('  профиль ' + $profile.Name + ' уже DomainAuthenticated (менять не нужно)') -ForegroundColor Green
+        } else {
+            Set-NetConnectionProfile -InterfaceIndex $profile.InterfaceIndex -NetworkCategory Private -ErrorAction SilentlyContinue
+            Write-Host ('  профиль ' + $profile.Name + ' -> Private') -ForegroundColor Green
+        }
     } else {
         Write-Host '  активное подключение не найдено' -ForegroundColor Yellow
     }
