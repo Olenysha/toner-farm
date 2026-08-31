@@ -1,24 +1,24 @@
 @echo off
-rem ╨г╤Б╤В╤А╨░╨╜╤П╨╡╤В ╤В╨░╨╣╨╝╨░╤Г╤В ╨▓╨╡╨▒-╨╝╨╛╤А╨┤╤Л ╨в╨╛╨╜╨╡╤А-╨д╨░╤А╨╝ ╤Б ╨┤╤А╤Г╨│╨╕╤Е ╤Г╤Б╤В╤А╨╛╨╣╤Б╤В╨▓ ╨▓ ╨╗╨╛╨║╨░╨╗╨║╨╡.
-rem ╨Я╤А╨╕╤З╨╕╨╜╨░: Windows ╨┐╨╛╨╝╨╡╤З╨░╨╡╤В Wi-Fi ╨║╨░╨║ "╨Ю╨▒╤Й╨╡╤Б╤В╨▓╨╡╨╜╨╜╨░╤П ╤Б╨╡╤В╤М" ╨╕ ╨▒╨╗╨╛╨║╨╕╤А╤Г╨╡╤В
-rem ╨▓╤Е╨╛╨┤╤П╤Й╨╕╨╡ ╨┐╨╛╨┤╨║╨╗╤О╤З╨╡╨╜╨╕╤П ╨║ python.exe. ╨С╨╗╨╛╨║-╨┐╤А╨░╨▓╨╕╨╗╨╛ ╤Б╨╕╨╗╤М╨╜╨╡╨╡ ╤А╨░╨╖╤А╨╡╤И╨░╤О╤Й╨╡╨│╨╛
-rem ╨┐╤А╨░╨▓╨╕╨╗╨░ ╨┤╨╗╤П ╨┐╨╛╤А╤В╨░ 5000, ╨┐╨╛╤Н╤В╨╛╨╝╤Г ╤В╨╡╨╗╨╡╤Д╨╛╨╜ ╨┐╨╛╨╗╤Г╤З╨░╨╡╤В ╤В╨░╨╣╨╝╨░╤Г╤В.
+rem Устраняет таймаут веб-морды Тонер-Фарм с других устройств в локалке.
+rem Причина: Windows помечает Wi-Fi как "Общественная сеть" и блокирует
+rem входящие подключения к python.exe. Блок-правило сильнее разрешающего
+rem правила для порта 5000, поэтому телефон получает таймаут.
 net session >nul 2>&1
 if errorlevel 1 (
-    echo ╨в╤А╨╡╨▒╤Г╤О╤В╤Б╤П ╨┐╤А╨░╨▓╨░ ╨░╨┤╨╝╨╕╨╜╨╕╤Б╤В╤А╨░╤В╨╛╤А╨░ тАФ ╨┐╨╡╤А╨╡╨╖╨░╨┐╤Г╤Б╨║╨░╤О ╤Б ╨┐╨╛╨▓╤Л╤И╨╡╨╜╨╕╨╡╨╝...
+    echo Требуются права администратора - перезапускаю с повышением...
     powershell -Command "Start-Process '%~f0' -Verb RunAs"
     exit /b
 )
 
-echo [1/4] ╨г╨┤╨░╨╗╤П╤О ╨▒╨╗╨╛╨║╨╕╤А╤Г╤О╤Й╨╕╨╡ ╨┐╤А╨░╨▓╨╕╨╗╨░ python.exe ╨┐╨╛ ╨╕╨╝╨╡╨╜╨╕ ╤З╨╡╤А╨╡╨╖ netsh ...
+echo [1/4] Удаляю блокирующие правила python.exe по имени через netsh ...
 netsh advfirewall firewall delete rule name="python.exe" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo   ╨г╨┤╨░╨╗╨╡╨╜╤Л ╨┐╤А╨░╨▓╨╕╨╗╨░ ╤Б ╨╕╨╝╨╡╨╜╨╡╨╝ "python.exe"
+    echo   Удалены правила с именем "python.exe"
 ) else (
-    echo   ╨Я╤А╨░╨▓╨╕╨╗ ╤Б ╨╕╨╝╨╡╨╜╨╡╨╝ "python.exe" ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜╨╛ ╨╕╨╗╨╕ ╤Г╨╢╨╡ ╤Г╨┤╨░╨╗╨╡╨╜╤Л
+    echo   Правил с именем "python.exe" не найдено или уже удалены
 )
 
-echo [2/4] ╨г╨┤╨░╨╗╤П╤О ╨▒╨╗╨╛╨║╨╕╤А╤Г╤О╤Й╨╕╨╡ ╨┐╤А╨░╨▓╨╕╨╗╨░ python.exe ╨┐╨╛ ╨┐╤Г╤В╨╕ ╨┐╤А╨╛╨│╤А╨░╨╝╨╝╤Л ...
+echo [2/4] Удаляю блокирующие правила python.exe по пути программы ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "^
     $stores = @('ActiveStore','PersistentStore');^
     $removed = 0;^
@@ -37,23 +37,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "^
             }^
         } catch {}^
     };^
-    Write-Host ('  ╨г╨┤╨░╨╗╨╡╨╜╨╛ ╨▒╨╗╨╛╨║╨╕╤А╤Г╤О╤Й╨╕╤Е ╨┐╤А╨░╨▓╨╕╨╗ python.exe: ' + $removed)"
+    Write-Host ('  Удалено блокирующих правил python.exe: ' + $removed)"
 
-echo [3/4] ╨Я╨╡╤А╨╡╨▓╨╛╨╢╤Г ╨░╨║╤В╨╕╨▓╨╜╨╛╨╡ ╨┐╨╛╨┤╨║╨╗╤О╤З╨╡╨╜╨╕╨╡ ╨▓ ╤З╨░╤Б╤В╨╜╤Л╨╣ ╨┐╤А╨╛╤Д╨╕╨╗╤М ...
+echo [3/4] Перевожу активное подключение в частный профиль ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "^
     $p = Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 'Internet' } | Select-Object -First 1;^
     if ($p) {^
         Set-NetConnectionProfile -InterfaceIndex $p.InterfaceIndex -NetworkCategory Private;^
-        Write-Host ('  ╨Я╤А╨╛╤Д╨╕╨╗╤М ╤Б╨╡╤В╨╕ ' + $p.Name + ' ╨╕╨╖╨╝╨╡╨╜╨╡╨╜ ╨╜╨░ Private')^
+        Write-Host ('  Профиль сети ' + $p.Name + ' изменен на Private')^
     } else {^
-        Write-Host '  ╨Р╨║╤В╨╕╨▓╨╜╨╛╨╡ ╨┐╨╛╨┤╨║╨╗╤О╤З╨╡╨╜╨╕╨╡ ╨╜╨╡ ╨╜╨░╨╣╨┤╨╡╨╜╨╛' }"
+        Write-Host '  Активное подключение не найдено' }"
 
-echo [4/4] ╨Ф╨╛╨▒╨░╨▓╨╗╤П╤О/╨╛╨▒╨╜╨╛╨▓╨╗╤П╤О ╤А╨░╨╖╤А╨╡╤И╨░╤О╤Й╨╡╨╡ ╨┐╤А╨░╨▓╨╕╨╗╨╛ ╨┤╨╗╤П ╨┐╨╛╤А╤В╨░ 5000 ...
+echo [4/4] Добавляю/обновляю разрешающее правило для порта 5000 ...
 netsh advfirewall firewall delete rule name="TonerFarm-5000" >nul 2>&1
 netsh advfirewall firewall add rule name="TonerFarm-5000" dir=in action=allow protocol=TCP localport=5000 profile=public,private,domain localip=any remoteip=any
 
 echo.
-echo ╨У╨╛╤В╨╛╨▓╨╛. ╨Я╤А╨╛╨▓╨╡╤А╤М ╤Б ╤В╨╡╨╗╨╡╤Д╨╛╨╜╨░: https://^<IP_╨╜╨╛╤Г╤В╨▒╤Г╨║╨░^>:5000
-echo ╨з╤В╨╛╨▒╤Л ╤Г╨╖╨╜╨░╤В╤М IP, ╨▓╤Л╨┐╨╛╨╗╨╜╨╕ ╨▓ PowerShell: Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp
-echo ╨Х╤Б╨╗╨╕ ╨▓╤Б╨╡ ╨╡╤Й╨╡ ╨╜╨╡ ╨╛╤В╨║╤А╤Л╨▓╨░╨╡╤В╤Б╤П тАФ ╨▓╤Л╨║╨╗╤О╤З╨╕ ╨╝╨╛╨▒╨╕╨╗╤М╨╜╤Л╨╣ ╨╕╨╜╤В╨╡╤А╨╜╨╡╤В ╨╜╨░ ╤В╨╡╨╗╨╡╤Д╨╛╨╜╨╡ ╨╕ ╤Г╨▒╨╡╨┤╨╕╤Б╤М, ╤З╤В╨╛ ╨╛╨╜ ╨▓ ╤В╨╛╨╣ ╨╢╨╡ Wi-Fi ╤Б╨╡╤В╨╕.
+echo Готово. Проверь с телефона: https://^<IP_ноутбука^>:5000
+echo Чтобы узнать IP, выполни в PowerShell: Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp
+echo Если все еще не открывается - выключи мобильный интернет на телефоне и убедись, что он в той же Wi-Fi сети.
 pause

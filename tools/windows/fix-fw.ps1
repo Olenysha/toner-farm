@@ -1,4 +1,4 @@
-try {
+﻿try {
     # 1. Удаляем автоматические блокирующие правила python.exe из обоих сторов
     $stores = @('ActiveStore', 'PersistentStore')
     $removed = 0
