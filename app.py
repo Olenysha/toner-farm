@@ -17,7 +17,7 @@ from io import BytesIO
 import qrcode
 from flask import (Flask, jsonify, redirect, render_template, request,
                    send_file, send_from_directory, session, url_for)
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from PIL import Image, ImageDraw
 
 import auth
@@ -397,11 +397,11 @@ def api_printers_create():
     if not floor_id:
         floor_id = db.execute('SELECT MIN(id) FROM floor_plans').fetchone()[0]
     cur = db.execute(
-        'INSERT INTO printers (name, model, type, slots_count, x, y, ip_address, floor_id) VALUES (?,?,?,?,?,?,?,?)',
+        'INSERT INTO printers (name, model, type, slots_count, x, y, ip_address, web_url, floor_id) VALUES (?,?,?,?,?,?,?,?,?)',
         (data.get('name'), data.get('model'), ptype,
          4 if ptype == 'color' else 1,
          float(data.get('x') or 50), float(data.get('y') or 50),
-         data.get('ip_address'), floor_id))
+         data.get('ip_address'), data.get('web_url'), floor_id))
     db.commit()
     p = db.execute('SELECT * FROM printers WHERE id = ?', (cur.lastrowid,)).fetchone()
     return jsonify(serialize_printer(db, p)), 201
@@ -415,7 +415,7 @@ def api_printers_update(pid):
     if not p:
         return jsonify({'error': 'Принтер не найден'}), 404
     fields = {}
-    for key in ('name', 'model', 'type', 'ip_address'):
+    for key in ('name', 'model', 'type', 'ip_address', 'web_url'):
         if key in data:
             fields[key] = data[key]
     if 'floor_id' in data:
@@ -439,6 +439,39 @@ def api_printers_delete(pid):
     db.execute('DELETE FROM printers WHERE id = ?', (pid,))
     db.commit()
     return jsonify({'ok': True})
+
+
+@app.route('/api/printers/import_web_urls', methods=['POST'])
+def api_import_web_urls():
+    """Импорт web_url из Excel: колонки IP и web."""
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'error': 'Файл не выбран'}), 400
+    try:
+        wb = load_workbook(f)
+        ws = wb.active
+        headers = {}
+        for cell in ws[1]:
+            if cell.value:
+                headers[str(cell.value).strip().lower()] = cell.column - 1
+        if 'ip' not in headers or 'web' not in headers:
+            return jsonify({'error': 'В файле должны быть колонки IP и web'}), 400
+        db = get_db()
+        updated = 0
+        skipped = 0
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            ip = str(row[headers['ip']] or '').strip()
+            url = str(row[headers['web']] or '').strip()
+            if not ip or not url:
+                skipped += 1
+                continue
+            cur = db.execute('UPDATE printers SET web_url=? WHERE ip_address=?', (url, ip))
+            if cur.rowcount:
+                updated += cur.rowcount
+        db.commit()
+        return jsonify({'ok': True, 'updated': updated, 'skipped': skipped})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/printers/<int:pid>/available_toners')

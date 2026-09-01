@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS printers (
     y REAL,
     floor_id INTEGER,                   -- этаж (floor_plans.id), на котором стоит принтер
     ip_address TEXT,                    -- IP для SNMP-опроса (уровень тонера, snmp_readings)
+    web_url TEXT,                       -- URL веб-интерфейса принтера (открывается по ЛКМ на карте)
     toner_bk_id INTEGER,
     toner_c_id INTEGER,
     toner_m_id INTEGER,
@@ -153,6 +154,8 @@ def migrate_db(db):
     cols = [r[1] for r in db.execute('PRAGMA table_info(printers)')]
     if 'floor_id' not in cols:
         db.execute('ALTER TABLE printers ADD COLUMN floor_id INTEGER')
+    if 'web_url' not in cols:
+        db.execute('ALTER TABLE printers ADD COLUMN web_url TEXT')
     ocols = [r[1] for r in db.execute('PRAGMA table_info(operations)')]
     if 'user_name' not in ocols:
         db.execute('ALTER TABLE operations ADD COLUMN user_name TEXT')
@@ -233,9 +236,9 @@ def seed_db(db):
     printers = seed.get('printers', [])
     if printers:
         db.executemany(
-            'INSERT INTO printers (name, model, type, slots_count, x, y, floor_id, ip_address) VALUES (?,?,?,?,?,?,?,?)',
+            'INSERT INTO printers (name, model, type, slots_count, x, y, floor_id, ip_address, web_url) VALUES (?,?,?,?,?,?,?,?,?)',
             [(p['name'], p['model'], p['type'], p['slots_count'],
-              p['x'], p['y'], floor_id, p.get('ip_address'))
+              p['x'], p['y'], floor_id, p.get('ip_address'), p.get('web_url'))
              for p in printers])
 
     barcodes = seed.get('barcodes', [])

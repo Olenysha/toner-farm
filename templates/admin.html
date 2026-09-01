@@ -21,7 +21,7 @@
 <div class="card">
     <h2>Принтеры</h2>
     <div class="table-wrap"><table id="printers-table">
-        <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>Этаж</th><th>X/Y</th><th>IP</th><th></th></tr></thead>
+        <thead><tr><th>Название</th><th>Модель</th><th>Тип</th><th>Этаж</th><th>X/Y</th><th>IP</th><th>Web</th><th></th></tr></thead>
         <tbody></tbody>
     </table></div>
     <h2 id="pf-title">Добавить принтер</h2>
@@ -34,6 +34,7 @@
     <label>X, %</label><input type="number" id="pf-x" min="0" max="100" step="0.5" value="50">
     <label>Y, %</label><input type="number" id="pf-y" min="0" max="100" step="0.5" value="50">
     <label>IP-адрес (опц.)</label><input type="text" id="pf-ip">
+    <label>Web-интерфейс (опц.)</label><input type="text" id="pf-web" placeholder="https://10.7.150.201/">
     <div style="margin-top:12px">
         <button class="btn" id="pf-save">Сохранить</button>
         <button class="btn btn-secondary" id="pf-reset">Сброс</button>
@@ -97,6 +98,16 @@
         <a class="btn btn-secondary" href="/admin/qr_print" target="_blank">Печать стикеров</a>
     </div>
     <div id="qr-out" style="margin-top:16px"></div>
+</div>
+
+<div class="card">
+    <h2>Импорт web-интерфейсов из Excel</h2>
+    <p style="font-size:13px;color:var(--muted)">Файл должен содержать колонки <b>IP</b> и <b>web</b>. По IP принтеры в БД получат соответствующий URL.</p>
+    <form id="web-import-form" enctype="multipart/form-data">
+        <input type="file" name="file" accept=".xlsx,.xls" style="min-height:48px">
+        <div style="margin-top:12px"><button class="btn" type="submit">Импортировать</button></div>
+    </form>
+    <div id="web-import-result" style="margin-top:12px"></div>
 </div>
 {% endblock %}
 
@@ -280,10 +291,11 @@ async function loadPrinters() {
     tb.innerHTML = '';
     printersCache.forEach(p => {
         const tr = document.createElement('tr');
+        const webIcon = p.web_url ? `<a href="${p.web_url}" target="_blank" title="${p.web_url}">🌐</a>` : '—';
         tr.innerHTML = `<td>${p.name}</td><td>${p.model}</td>
             <td>${p.type === 'color' ? 'цветной' : 'моно'}</td>
             <td>${floorName(p.floor_id)}</td>
-            <td>${p.x} / ${p.y}</td><td>${p.ip_address || '—'}</td>
+            <td>${p.x} / ${p.y}</td><td>${p.ip_address || '—'}</td><td>${webIcon}</td>
             <td style="white-space:nowrap">
                 <button class="btn btn-sm btn-secondary" data-edit="${p.id}">Изм.</button>
                 <button class="btn btn-sm btn-danger" data-del="${p.id}">✕</button>
@@ -308,12 +320,13 @@ function editPrinter(id) {
     document.getElementById('pf-x').value = p.x;
     document.getElementById('pf-y').value = p.y;
     document.getElementById('pf-ip').value = p.ip_address || '';
+    document.getElementById('pf-web').value = p.web_url || '';
 }
 
 function resetPrinterForm() {
     document.getElementById('pf-title').textContent = 'Добавить принтер';
     document.getElementById('pf-id').value = '';
-    ['pf-name', 'pf-model', 'pf-ip'].forEach(i => document.getElementById(i).value = '');
+    ['pf-name', 'pf-model', 'pf-ip', 'pf-web'].forEach(i => document.getElementById(i).value = '');
 }
 
 document.getElementById('pf-save').onclick = async () => {
@@ -325,7 +338,8 @@ document.getElementById('pf-save').onclick = async () => {
         floor_id: Number(document.getElementById('pf-floor').value) || null,
         x: Number(document.getElementById('pf-x').value),
         y: Number(document.getElementById('pf-y').value),
-        ip_address: document.getElementById('pf-ip').value || null
+        ip_address: document.getElementById('pf-ip').value || null,
+        web_url: document.getElementById('pf-web').value || null
     };
     const btn = document.getElementById('pf-save');
     btn.disabled = true; btn.textContent = 'Сохранение…';
@@ -495,6 +509,23 @@ document.getElementById('qr-gen').onclick = async () => {
     const j = await api('/api/qr/' + encodeURIComponent(ean));
     document.getElementById('qr-out').innerHTML =
         `<img src="${j.url}" style="width:180px" alt="QR"><p style="font-family:monospace">${ean}</p>`;
+};
+
+// импорт web-интерфейсов из Excel
+document.getElementById('web-import-form').onsubmit = async ev => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const r = await fetch('/api/printers/import_web_urls', { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({}));
+    const out = document.getElementById('web-import-result');
+    if (r.ok) {
+        out.innerHTML = `<p style="color:var(--ok)">Обновлено принтеров: ${j.updated}, пропущено строк: ${j.skipped}</p>`;
+        toast('Импорт завершён', 'ok');
+        loadPrinters();
+    } else {
+        out.innerHTML = `<p style="color:var(--err)">${j.error || 'Ошибка импорта'}</p>`;
+        toast(j.error || 'Ошибка импорта', 'err');
+    }
 };
 
 // предприятия → этажи → селекты и мини-карта, затем остальное

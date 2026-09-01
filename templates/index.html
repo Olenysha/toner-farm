@@ -214,7 +214,13 @@ function renderIcons(printers) {
                 el.classList.add('disabled');
             }
         } else {
-            el.onclick = () => showPrinter(p);
+            if (p.web_url) {
+                el.title = p.name + '\nЛКМ — открыть веб-интерфейс\nПКМ — информация / замена тонера';
+                el.onclick = () => window.open(p.web_url, '_blank');
+                el.oncontextmenu = ev => { ev.preventDefault(); showPrinter(p); };
+            } else {
+                el.onclick = () => showPrinter(p);
+            }
         }
         canvas.appendChild(el);
     });
@@ -336,6 +342,9 @@ async function showPrinter(p) {
 
     let html = `<p>${statusDot(p.status_color)}<br>
         <b>${p.model}</b> (${p.type === 'color' ? 'цветной' : 'моно'})</p>`;
+    if (p.web_url) {
+        html += `<p><a href="${p.web_url}" target="_blank" class="btn btn-sm btn-secondary">🌐 Открыть веб-интерфейс</a></p>`;
+    }
 
     if (snmp) {
         html += `<p style="font-size:12px;color:var(--muted)">Обновлено: ${timeAgo(snmp.timestamp)}</p>`;
