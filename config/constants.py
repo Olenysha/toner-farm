@@ -26,6 +26,9 @@ SNMP_TIMEOUT = 3            # секунд на один SNMP-запрос
 SNMP_INTERVAL = int(os.environ.get('SNMP_INTERVAL', '600'))  # секунд между фоновыми опросами
 WALK_MAX_STEPS = 500        # страховка от бесконечного walk
 
+# --- Агенты SNMP (удалённые сети) --------------------------------------------
+AGENT_TOKEN = os.environ.get('AGENT_TOKEN', '')
+
 # --- Карты / загрузки ---------------------------------------------------------
 ALLOWED_PLAN_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 

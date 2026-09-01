@@ -549,6 +549,63 @@ def api_all_printers_snmp():
     return jsonify(result)
 
 
+@app.route('/api/agents/snmp_report', methods=['POST'])
+def api_agent_snmp_report():
+    """Приём SNMP-данных от удалённого агента (Android/Termux, другая сеть).
+
+    Агент опрашивает принтер локально и шлёт сюда JSON. Требуется AGENT_TOKEN.
+    """
+    from config.constants import AGENT_TOKEN
+    if not AGENT_TOKEN:
+        return jsonify({'error': 'AGENT_TOKEN не настроен на сервере'}), 403
+    data = request.get_json(force=True)
+    if data.get('token') != AGENT_TOKEN:
+        return jsonify({'error': 'Неверный токен'}), 401
+
+    printer_id = data.get('printer_id')
+    ip_address = (data.get('ip_address') or '').strip()
+    db = get_db()
+    p = None
+    if printer_id:
+        p = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
+    if not p and ip_address:
+        p = db.execute('SELECT * FROM printers WHERE ip_address = ?', (ip_address,)).fetchone()
+    if not p:
+        return jsonify({'error': 'Принтер не найден'}), 404
+
+    def _int(v):
+        try:
+            return int(v) if v is not None else None
+        except (ValueError, TypeError):
+            return None
+
+    alerts = data.get('alerts') or []
+    if isinstance(alerts, str):
+        try:
+            alerts = json.loads(alerts)
+        except ValueError:
+            alerts = []
+    raw_data = data.get('raw_data') or {}
+    if isinstance(raw_data, str):
+        try:
+            raw_data = json.loads(raw_data)
+        except ValueError:
+            raw_data = {}
+
+    db.execute(
+        '''INSERT INTO snmp_readings
+           (printer_id, timestamp, black_level, cyan_level, magenta_level, yellow_level,
+            page_counter, status_text, alerts, raw_data)
+           VALUES (?,?,?,?,?,?,?,?,?,?)''',
+        (p['id'], now_str(), _int(data.get('black_level')), _int(data.get('cyan_level')),
+         _int(data.get('magenta_level')), _int(data.get('yellow_level')),
+         _int(data.get('page_counter')), data.get('status_text') or 'Unknown',
+         json.dumps(alerts, ensure_ascii=False),
+         json.dumps(raw_data, ensure_ascii=False)))
+    db.commit()
+    return jsonify({'ok': True, 'printer_id': p['id']})
+
+
 @app.route('/api/barcode_map/<ean>', methods=['PUT'])
 def api_barcode_map_update(ean):
     data = request.get_json(force=True)
