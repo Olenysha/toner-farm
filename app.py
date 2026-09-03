@@ -1050,7 +1050,7 @@ if __name__ == '__main__':
         app.config['HTTPS_ENABLED'] = False
         print('[HTTP]  http://<host>:5000 (сканер не заработает без HTTPS — используй reverse proxy или certs/)')
 
-    # Фоновый SNMP-опрос принтеров
+    # Фоновый SNMP-опрос принтеров (в Docker — отдельный процесс snmp_poller.py)
     start_snmp_polling()
 
     app.run(host='0.0.0.0', port=5000, ssl_context=ssl_ctx, threaded=True)
