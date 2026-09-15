@@ -18,8 +18,41 @@ from pysnmp.hlapi.asyncio import (SnmpEngine, CommunityData,
                                   get_cmd, next_cmd)
 
 from config.constants import (COMMUNITY, SNMP_TIMEOUT, SNMP_INTERVAL,
-                               WALK_MAX_STEPS, SEVERITY_ICON)
+                               WALK_MAX_STEPS, SEVERITY_ICON,
+                               TONER_CHANGE_LOW, TONER_CHANGE_HIGH)
 from db import DATABASE, ALERT_DATABASE, now_str
+
+
+def _detect_toner_changes(db, pid, new_row_id, levels):
+    """Скачок уровня (<=LOW → >=HIGH) = тонер заменили вручную, мимо системы.
+
+    Создаёт запись toner_change_hints — по ней UI спросит пользователя,
+    не установили ли новый тонер, и предложит списать его со склада.
+    Повторные записи по тому же слоту не плодим, пока висят pending.
+    """
+    prev = db.execute(
+        'SELECT black_level, cyan_level, magenta_level, yellow_level '
+        'FROM snmp_readings WHERE printer_id = ? AND id < ? '
+        'ORDER BY id DESC LIMIT 1', (pid, new_row_id)).fetchone()
+    if prev is None:
+        return
+    slots = (('black', 'black_level'), ('cyan', 'cyan_level'),
+             ('magenta', 'magenta_level'), ('yellow', 'yellow_level'))
+    for color, col in slots:
+        old, new = prev[col], levels.get(col)
+        if old is None or new is None:
+            continue
+        if old <= TONER_CHANGE_LOW and new >= TONER_CHANGE_HIGH:
+            dup = db.execute(
+                "SELECT 1 FROM toner_change_hints "
+                "WHERE printer_id = ? AND color = ? AND status = 'pending'",
+                (pid, color)).fetchone()
+            if not dup:
+                db.execute(
+                    'INSERT INTO toner_change_hints '
+                    '(printer_id, color, prev_level, new_level, detected_at) '
+                    'VALUES (?,?,?,?,?)',
+                    (pid, color, old, new, now_str()))
 
 
 def detect_vendor(*texts):
@@ -246,7 +279,7 @@ async def _poll_printer(db, pid, ip, model, name):
     finally:
         adb.close()
 
-    db.execute(
+    cur = db.execute(
         '''INSERT INTO snmp_readings
            (printer_id, timestamp, black_level, cyan_level, magenta_level, yellow_level,
             page_counter, status_text, alerts, raw_data)
@@ -255,6 +288,9 @@ async def _poll_printer(db, pid, ip, model, name):
          page_counter, status_text, json.dumps(alerts, ensure_ascii=False),
          json.dumps({'sys_name': sys_name, 'sys_descr': sys_descr,
                     'drums': drums}, ensure_ascii=False)))
+    _detect_toner_changes(db, pid, cur.lastrowid,
+                          {'black_level': black_level, 'cyan_level': cyan_level,
+                           'magenta_level': magenta_level, 'yellow_level': yellow_level})
     db.commit()
 
 

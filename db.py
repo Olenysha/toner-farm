@@ -97,6 +97,16 @@ CREATE TABLE IF NOT EXISTS snmp_readings (
     alerts TEXT,                         -- JSON-массив строк ["503: Требуется внимание", ...]
     raw_data TEXT                        -- JSON для отладки (sys_name/sys_descr)
 );
+CREATE TABLE IF NOT EXISTS toner_change_hints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    printer_id INTEGER NOT NULL,
+    color TEXT,                          -- black/cyan/magenta/yellow (какой слот)
+    prev_level INTEGER,
+    new_level INTEGER,
+    detected_at TIMESTAMP DEFAULT (datetime('now','localtime')),
+    status TEXT DEFAULT 'pending',       -- pending / confirmed / dismissed
+    toner_id INTEGER                     -- какой тонер установили (при подтверждении)
+);
 """
 
 # SLOT_COLUMN импортирован из config.constants

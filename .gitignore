@@ -25,3 +25,6 @@ PRESENTATION.md
 # OS
 Thumbs.db
 .DS_Store
+
+# Локальная вики (не для репозитория)
+WIKI.md

@@ -12,10 +12,22 @@ PY
 # gunicorn не выполняет __main__ из app.py, поэтому start_snmp_polling() там не сработает.
 python snmp_poller.py &
 
+# HTTPS: SSL-логика из app.py под gunicorn не выполняется (__main__ не запускается),
+# поэтому TLS поднимаем здесь — если пара сертификат+ключ доступна
+# (env или ./certs/*.pem внутри контейнера).
+CERT="${CERT_FILE:-/app/certs/cert.pem}"
+KEY="${KEY_FILE:-/app/certs/key.pem}"
+SSL_ARGS=""
+if [ -f "$CERT" ] && [ -f "$KEY" ]; then
+    SSL_ARGS="--certfile $CERT --keyfile $KEY"
+    echo "[HTTPS] включён: $CERT"
+fi
+
 # Запуск production WSGI-сервера.
 exec gunicorn -b 0.0.0.0:${PORT:-5000} \
     -w 2 --threads 4 \
     --timeout 30 \
     --access-logfile - \
     --error-logfile - \
+    $SSL_ARGS \
     app:app

@@ -26,7 +26,8 @@ services:
       # - ./certs:/app/certs:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
+      # с TLS gunicorn отвечает только по https — пробуем оба варианта
+      test: ["CMD-SHELL", "curl -fk https://localhost:5000/login || curl -f http://localhost:5000/login"]
       interval: 30s
       timeout: 10s
       retries: 3

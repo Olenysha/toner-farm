@@ -527,5 +527,83 @@ function confirmInstall(p) {
 })();
 
 load();
+
+// ---------- уведомления «заменили тонер?» по скачку SNMP-уровня ----------
+// Серия подсказок показывается одна за другой (могла произойти несколько замен,
+// пока никто не заходил в систему). Только для роли edit (подтверждение списывает склад).
+async function pollChangeHints() {
+    let hints;
+    try {
+        hints = await api('/api/change_hints');
+    } catch (e) {
+        return; // 403 у view-роли или сетевой сбой — молча
+    }
+    if (hints.length) showHintQueue(hints, 0);
+}
+
+function showHintQueue(hints, i) {
+    if (i >= hints.length) { closeModal(); loadFloor(); return; }
+    const h = hints[i];
+    const body = `
+        <p style="font-size:16px">В принтере <b>${h.printer_name}</b> уровень
+        ${h.color_ru} тонера вырос с ${h.prev_level}% до ${h.new_level}%.</p>
+        <p>Похоже, тонер заменили. Учесть установку и списать тонер со склада?</p>`;
+    showModal(`Возможна замена тонера (${i + 1}/${hints.length})`, body, [
+        { label: 'Да, выбрать тонер', cls: 'btn-ok', keepOpen: true,
+          onClick: () => showHintTonerChoice(h, () => showHintQueue(hints, i + 1)) },
+        { label: 'Нет', cls: 'btn-secondary', keepOpen: true,
+          onClick: async () => {
+              try { await api('/api/change_hints/' + h.id + '/dismiss', 'POST'); }
+              catch (e) { toast(e.message, 'err'); }
+              showHintQueue(hints, i + 1);
+          } },
+    ]);
+}
+
+async function showHintTonerChoice(h, next) {
+    let items = [];
+    try {
+        items = await api('/api/printers/' + h.printer_id + '/available_toners');
+    } catch (e) { /* покажем пустой список */ }
+
+    const body = items.length
+        ? `<p style="font-size:13px;color:var(--muted)">Совместимые тонеры на складе — нажмите «Установить»:</p>` +
+          items.map(t => `
+            <div class="stock-row">
+                <div>${colorChip(t.color)} <b>${t.model_name || t.ean_13}</b><br>
+                <small style="color:var(--muted)">на складе: ${t.stock_count} шт.</small></div>
+                <button class="btn btn-sm btn-ok" data-tid="${t.toner_id}">Установить</button>
+            </div>`).join('')
+        : `<p>На складе нет совместимых тонеров для <b>${h.printer_model}</b>.</p>`;
+
+    showModal('Какой тонер установили? — ' + h.printer_name, body,
+        [{ label: 'Назад', cls: 'btn-secondary', keepOpen: true,
+           onClick: () => showHintQueue([h], 0) }]);
+
+    document.querySelectorAll('#modal-body [data-tid]').forEach(b => {
+        b.onclick = async () => {
+            b.disabled = true;
+            b.textContent = '…';
+            try {
+                await api('/api/change_hints/' + h.id + '/confirm', 'POST',
+                          { toner_id: +b.dataset.tid });
+                showModal('Готово ✓', '<p style="font-size:18px">Тонер списан со склада и учтён.</p>', []);
+                setTimeout(() => { closeModal(); next(); loadFloor(); }, 1200);
+            } catch (e) {
+                toast(e.message, 'err');
+                b.disabled = false;
+                b.textContent = 'Установить';
+            }
+        };
+    });
+}
+
+pollChangeHints();
+setInterval(() => {
+    // не выскакиваем поверх открытой модалки
+    if (!document.getElementById('modal-backdrop').classList.contains('open')) {
+        pollChangeHints();
+    }
+}, 60000);
 </script>
 {% endblock %}

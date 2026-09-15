@@ -20,6 +20,12 @@ SLOT_COLUMN = {
 # Сколько подряд неудачных SNMP-опросов переводит принтер в серый статус
 SNMP_FAIL_GREY = 5
 
+# Детекция замены тонера «мимо системы»: скачок уровня SNMP
+# с <= TONER_CHANGE_LOW до >= TONER_CHANGE_HIGH = тонер заменили вручную.
+# По такому событию UI спрашивает пользователя и предлагает списать тонер со склада.
+TONER_CHANGE_LOW = int(os.environ.get('TONER_CHANGE_LOW', '2'))
+TONER_CHANGE_HIGH = int(os.environ.get('TONER_CHANGE_HIGH', '90'))
+
 # --- SNMP ----------------------------------------------------------------------
 COMMUNITY = os.environ.get('SNMP_COMMUNITY', 'public')
 SNMP_TIMEOUT = 3            # секунд на один SNMP-запрос

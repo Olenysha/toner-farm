@@ -29,9 +29,13 @@ from db import (BASE_DIR, DATA_DIR, STATIC_DIR, QR_DIR, FLOOR_PLAN_PATH,
 from snmp_monitor import start_snmp_polling
 
 app = Flask(__name__)
-# True, когда сервер запущен с TLS-сертификатом (выставляется в __main__);
-# по флагу base.html решает, нужен ли редирект http → https
-app.config.setdefault('HTTPS_ENABLED', False)
+# True, когда доступна пара сертификат+ключ (env или ./certs/*.pem).
+# Под gunicorn (Docker) TLS поднимается в entrypoint.sh через --certfile/--keyfile,
+# под dev-сервером — ssl_context в __main__; по флагу base.html решает,
+# нужен ли редирект http → https.
+_CERT_FILE = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, 'certs', 'cert.pem')
+_KEY_FILE = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, 'certs', 'key.pem')
+app.config['HTTPS_ENABLED'] = os.path.exists(_CERT_FILE) and os.path.exists(_KEY_FILE)
 app.secret_key = auth.load_or_create_secret(DATA_DIR)
 app.permanent_session_lifetime = timedelta(days=auth.SESSION_DAYS)
 
@@ -309,25 +313,23 @@ def api_stock_deplete():
     return jsonify({'ok': True, 'depleted': qty})
 
 
-@app.route('/api/install', methods=['POST'])
-def api_install():
-    """Установка тонера в принтер; старый тонер слота автоматически списывается."""
-    data = request.get_json(force=True)
-    toner_id = data.get('toner_id')
-    printer_id = data.get('printer_id')
-    db = get_db()
+def _install_toner(db, toner_id, printer_id):
+    """Ядро установки тонера: проверки, переключение слота, авто-списание старого.
+
+    Возвращает (error, old_toner_id); error=None при успехе.
+    """
     toner = db.execute('SELECT * FROM toners WHERE id = ?', (toner_id,)).fetchone()
     printer = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
     if not toner or not printer:
-        return jsonify({'error': 'Тонер или принтер не найден'}), 404
+        return 'Тонер или принтер не найден', None
     if toner['status'] == 'installed':
-        return jsonify({'error': 'Тонер уже установлен'}), 400
+        return 'Тонер уже установлен', None
     bc = get_barcode(db, toner['ean_13'])
     if not bc or bc['color'] not in SLOT_COLUMN:
-        return jsonify({'error': 'Неизвестный цвет тонера'}), 400
+        return 'Неизвестный цвет тонера', None
     col = SLOT_COLUMN[bc['color']]  # цвет всегда из БД, вручную не выбирается
     if printer['type'] == 'mono' and col != 'toner_bk_id':
-        return jsonify({'error': 'В моно-принтер можно ставить только чёрный тонер'}), 400
+        return 'В моно-принтер можно ставить только чёрный тонер', None
 
     old_toner_id = printer[col]
     now = now_str()
@@ -341,10 +343,103 @@ def api_install():
         (printer_id, now, toner_id))
     db.execute(f'UPDATE printers SET {col}=? WHERE id=?', (toner_id, printer_id))
     _log_op(db, toner_id, printer_id, 'install', old_toner_id, now)
+    return None, old_toner_id
+
+
+@app.route('/api/install', methods=['POST'])
+def api_install():
+    """Установка тонера в принтер; старый тонер слота автоматически списывается."""
+    data = request.get_json(force=True)
+    db = get_db()
+    err, old_id = _install_toner(db, data.get('toner_id'), data.get('printer_id'))
     db.commit()
+    if err:
+        return jsonify({'error': err}), 400
+    printer_id = data.get('printer_id')
     p = db.execute('SELECT * FROM printers WHERE id = ?', (printer_id,)).fetchone()
-    return jsonify({'ok': True, 'auto_depleted_id': old_toner_id,
+    return jsonify({'ok': True, 'auto_depleted_id': old_id,
                     'printer': serialize_printer(db, p)})
+
+
+# ------------------------------------------------- Замена тонера «мимо системы»
+# Детектируется по скачку SNMP-уровня (см. snmp_monitor._detect_toner_changes):
+# если уровень вырос с <=2% до >=90%, тонер заменили вручную, без сканера.
+# Здесь — очередь уведомлений: пользователь подтверждает и выбирает тонер со склада.
+
+HINT_SLOT_COLUMN = {'black': 'toner_bk_id', 'cyan': 'toner_c_id',
+                    'magenta': 'toner_m_id', 'yellow': 'toner_y_id'}
+HINT_COLOR_RU = {'black': 'чёрного', 'cyan': 'голубого',
+                 'magenta': 'пурпурного', 'yellow': 'жёлтого'}
+
+
+@app.route('/api/change_hints')
+def api_change_hints():
+    """Очередь предположений о замене тонера (по скачку SNMP-уровня).
+
+    Только для edit — подтверждение списывает тонер со склада.
+    Подсказки, по которым тонер уже установили штатно (в слоте стоит тонер
+    с installed_at позже detected_at), авто-закрываем.
+    """
+    user = auth.current_user()
+    if not user or user['role'] != 'edit':
+        return jsonify({'error': 'Недостаточно прав'}), 403
+    db = get_db()
+    rows = db.execute(
+        'SELECT h.*, p.name AS printer_name, p.model AS printer_model '
+        'FROM toner_change_hints h JOIN printers p ON p.id = h.printer_id '
+        "WHERE h.status = 'pending' ORDER BY h.id").fetchall()
+    out = []
+    for h in rows:
+        col = HINT_SLOT_COLUMN.get(h['color'])
+        if col:
+            slot = db.execute(
+                f'SELECT installed_at FROM toners WHERE id = '
+                f'(SELECT {col} FROM printers WHERE id = ?)',
+                (h['printer_id'],)).fetchone()
+            if slot and slot['installed_at'] and slot['installed_at'] > h['detected_at']:
+                # тонер уже учтён штатной установкой — подсказка неактуальна
+                db.execute("UPDATE toner_change_hints SET status='dismissed' WHERE id=?",
+                           (h['id'],))
+                continue
+        d = dict(h)
+        d['color_ru'] = HINT_COLOR_RU.get(h['color'], h['color'])
+        out.append(d)
+    db.commit()
+    return jsonify(out)
+
+
+@app.route('/api/change_hints/<int:hid>/confirm', methods=['POST'])
+def api_change_hint_confirm(hid):
+    """Подтверждение: выбранный тонер со склада устанавливается в принтер."""
+    data = request.get_json(force=True)
+    db = get_db()
+    hint = db.execute(
+        "SELECT * FROM toner_change_hints WHERE id=? AND status='pending'",
+        (hid,)).fetchone()
+    if not hint:
+        return jsonify({'error': 'Уведомление уже обработано'}), 404
+    err, old_id = _install_toner(db, data.get('toner_id'), hint['printer_id'])
+    if err:
+        return jsonify({'error': err}), 400
+    db.execute("UPDATE toner_change_hints SET status='confirmed', toner_id=? WHERE id=?",
+               (data.get('toner_id'), hid))
+    db.commit()
+    p = db.execute('SELECT * FROM printers WHERE id=?', (hint['printer_id'],)).fetchone()
+    return jsonify({'ok': True, 'auto_depleted_id': old_id,
+                    'printer': serialize_printer(db, p)})
+
+
+@app.route('/api/change_hints/<int:hid>/dismiss', methods=['POST'])
+def api_change_hint_dismiss(hid):
+    """Отклонение: тонер не наш / менять никто ничего не будет."""
+    db = get_db()
+    cur = db.execute(
+        "UPDATE toner_change_hints SET status='dismissed' WHERE id=? AND status='pending'",
+        (hid,))
+    db.commit()
+    if not cur.rowcount:
+        return jsonify({'error': 'Уведомление уже обработано'}), 404
+    return jsonify({'ok': True})
 
 
 @app.route('/api/return', methods=['POST'])
@@ -1039,8 +1134,7 @@ ensure_floor_plan()
 
 if __name__ == '__main__':
     # Сертификат: явные пути из env (Docker монтирует ./certs) или ./certs/*.pem
-    cert = os.environ.get('CERT_FILE') or os.path.join(BASE_DIR, 'certs', 'cert.pem')
-    key = os.environ.get('KEY_FILE') or os.path.join(BASE_DIR, 'certs', 'key.pem')
+    cert, key = _CERT_FILE, _KEY_FILE
     if os.path.exists(cert) and os.path.exists(key):
         ssl_ctx = (cert, key)
         app.config['HTTPS_ENABLED'] = True
